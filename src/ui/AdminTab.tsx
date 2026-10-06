@@ -104,7 +104,7 @@ function RecipeForm({ recipe, onDone }: { recipe: Recipe | null; onDone(): void 
         {num('pulseStep', 'Pulse 최소 단위')}
         {num('passLowPct', '적합 하한 (목표 대비 %)')}
         {num('passHighPct', '적합 상한 (목표 대비 %)')}
-        {num('adjustPct', '조정 기준 (목표 대비 %)')}
+        {num('adjustPct', '조정 희망 비율 (목표 대비 %)')}
         {num('bandCenterPct', '경고 기준점 (목표 대비 %)')}
         {(['노란색', '빨간색', '보라색'] as const).map((c, i) => (
           <Field key={c} label={`${c} 경고 시작 (±%)`}>

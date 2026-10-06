@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { dispenserView, toPoint } from '../data/model'
 import { useDb } from '../data/store'
 import type { Batch, DispenserId } from '../data/types'
-import { DISPENSERS } from '../data/types'
+import { DEFAULT_CRITERIA, DISPENSERS } from '../data/types'
 import { walkForward } from '../engine'
 import { Panel, Select, fmt } from './common'
 
@@ -15,6 +15,7 @@ function Formula({ children }: { children: string }) {
 export function LogicTab({ batch }: { batch: Batch | null }) {
   const db = useDb()
   const [disp, setDisp] = useState<DispenserId>('D1')
+  const adjust = batch?.adjustPct ?? db.recipes.find((r) => r.active)?.adjustPct ?? DEFAULT_CRITERIA.adjustPct
 
   const views = useMemo(() => (batch ? DISPENSERS.map((d) => ({ d, v: dispenserView(db, batch, d.id) })) : []), [db, batch])
 
@@ -49,8 +50,8 @@ export function LogicTab({ batch }: { batch: Batch | null }) {
             구합니다. 새 배치가 시작되면 기준 수준만 불확실하게 두고 다시 시작하므로, 이 배치의 IPC 2~3건이면 이 배치의 값이 추정을 이끕니다.
           </li>
           <li>
-            <b>조정할 때는 목표의 105%에 맞춥니다.</b> 토출이 진행되면 중량이 서서히 줄기 때문에 여유를 얹어 둡니다.
-            <Formula>추천 Pulse = 현재 Pulse + (목표 × 105% − 현재 추정 중량) ÷ 감도 b</Formula>
+            <b>조정할 때는 목표의 {adjust}%에 맞춥니다.</b> 이 비율은 레시피에서 정합니다. 토출이 진행되면 중량이 서서히 줄기 때문에 여유를 얹어 둡니다.
+            <Formula>{`추천 Pulse = 현재 Pulse + (목표 × ${adjust}% − 현재 추정 중량) ÷ 감도 b`}</Formula>
           </li>
           <li>
             <b>토출 중 감소량</b>은 같은 Pulse로 이어진 IPC 두 건의 중량 차이를 트레이 수로 나눠 구합니다. 과거 기록에서 통계적으로 확인될 때만 쓰고,

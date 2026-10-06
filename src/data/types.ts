@@ -156,7 +156,7 @@ export interface DbState {
 export const DEFAULT_CRITERIA: Criteria = {
   bands: [2, 5, 10],
   bandCenterPct: 100,
-  adjustPct: 105,
+  adjustPct: 103,
   passLowPct: -5,
   passHighPct: 5,
   pulseStep: 0.001,

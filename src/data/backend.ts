@@ -22,7 +22,7 @@ export interface Backend {
 
 export const newId = () => crypto.randomUUID()
 
-const KEY = 'microneedle-ipc/db/v1'
+const KEY = 'microneedle-ipc/db/v2'
 
 function seed(): DbState {
   return {
