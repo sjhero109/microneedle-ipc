@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AuthProvider, useAuth } from './data/auth'
-import { useDb } from './data/store'
+import { useDb, useDbLoaded } from './data/store'
 import type { Role } from './data/types'
 import { AdminTab } from './ui/AdminTab'
 import { BatchBar } from './ui/BatchBar'
@@ -13,31 +13,59 @@ type Tab = 'calc' | 'logic' | 'history' | 'admin'
 const BATCH_KEY = 'microneedle-ipc/batch'
 
 function Login() {
-  const { login } = useAuth()
+  const { mode, loginDemo, signIn, error } = useAuth()
   const [name, setName] = useState('')
-  const enter = (role: Role) => name.trim() && login(name.trim(), role)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  if (mode === 'demo') {
+    const enter = (role: Role) => name.trim() && loginDemo(name.trim(), role)
+    return (
+      <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-4 px-4">
+        <h1 className="text-2xl font-bold">마이크로니들 IPC</h1>
+        <Field label="이름">
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="primary" disabled={!name.trim()} onClick={() => enter('user')}>
+            일반 사용자
+          </Button>
+          <Button disabled={!name.trim()} onClick={() => enter('admin')}>
+            관리자
+          </Button>
+        </div>
+        <p className="text-xs text-sub">시연 모드입니다. 기록은 이 브라우저에만 저장됩니다.</p>
+      </main>
+    )
+  }
+
+  async function submit() {
+    setBusy(true)
+    await signIn(email.trim(), password)
+    setBusy(false)
+  }
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-4 px-4">
       <h1 className="text-2xl font-bold">마이크로니들 IPC</h1>
-      <Field label="이름">
-        <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      <Field label="이메일">
+        <Input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
       </Field>
-      <div className="grid grid-cols-2 gap-2">
-        <Button variant="primary" disabled={!name.trim()} onClick={() => enter('user')}>
-          일반 사용자
-        </Button>
-        <Button disabled={!name.trim()} onClick={() => enter('admin')}>
-          관리자
-        </Button>
-      </div>
-      <p className="text-xs text-sub">시연 모드입니다. 기록은 이 브라우저에만 저장됩니다.</p>
+      <Field label="비밀번호">
+        <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+      </Field>
+      {error && <p className="text-sm text-bad">{error}</p>}
+      <Button variant="primary" disabled={!email.trim() || !password || busy} onClick={submit}>
+        로그인
+      </Button>
     </main>
   )
 }
 
 function Shell() {
-  const { actor, logout } = useAuth()
+  const { actor, logout, ready } = useAuth()
   const db = useDb()
+  const loaded = useDbLoaded()
   const [tab, setTab] = useState<Tab>('calc')
   const [batchId, setBatchId] = useState<string | null>(() => {
     try {
@@ -46,7 +74,9 @@ function Shell() {
       return null
     }
   })
+  if (!ready) return <p className="p-8 text-center text-sub">불러오는 중…</p>
   if (!actor) return <Login />
+  if (!loaded) return <p className="p-8 text-center text-sub">불러오는 중…</p>
 
   const batch = db.batches.find((b) => b.id === batchId) ?? null
   const select = (id: string | null) => {
@@ -76,7 +106,7 @@ function Shell() {
               <span className="block font-medium">{actor.name}</span>
               <span className="block text-xs text-sub">{actor.role === 'admin' ? '관리자' : '일반 사용자'}</span>
             </span>
-            <Button className="h-9 px-3 text-sm" onClick={logout}>
+            <Button className="h-9 px-3 text-sm" onClick={() => void logout()}>
               로그아웃
             </Button>
           </div>

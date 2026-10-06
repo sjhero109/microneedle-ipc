@@ -1,28 +1,46 @@
 import { useSyncExternalStore } from 'react'
 import type { Phase } from '../engine'
 import { localBackend, newId, type AuditDraft, type Backend, type Write } from './backend'
+import { firebaseEnabled } from './firebase'
 import { batchRecords, dispenserView, evaluate } from './model'
 import type { Actor, Batch, Correction, DbState, DispenserId, IpcRecord, Recipe, UserProfile } from './types'
 import { DISPENSERS, materialOf, shotsOf, targetOf } from './types'
 
 const EMPTY: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [] }
 
-let backend: Backend = localBackend()
+let backend: Backend | null = null
 let state: DbState = EMPTY
 const listeners = new Set<() => void>()
-let unsubscribe = backend.subscribe((s) => {
+let unsubscribe = () => {}
+// 저장소에서 첫 데이터가 모두 도착했는지
+let loaded = false
+
+function emit(s: DbState, isLoaded = true) {
+  loaded = isLoaded
   state = s
   listeners.forEach((l) => l())
-})
+}
 
-/** 저장소를 바꿔 끼운다 (Firebase 연결 시 사용) */
+/** 저장소를 바꿔 끼운다 (Firebase 로그인 후 사용) */
 export function setBackend(b: Backend) {
   unsubscribe()
   backend = b
-  unsubscribe = backend.subscribe((s) => {
-    state = s
-    listeners.forEach((l) => l())
-  })
+  unsubscribe = b.subscribe((s) => emit(s))
+}
+
+/** 로그아웃하면 화면에 남은 데이터도 비운다 */
+export function clearBackend() {
+  unsubscribe()
+  unsubscribe = () => {}
+  backend = null
+  emit(EMPTY, false)
+}
+
+if (!firebaseEnabled) setBackend(localBackend())
+
+async function commit(writes: Write[], entries: AuditDraft[]) {
+  if (!backend) throw new Error('로그인이 필요합니다.')
+  return backend.commit(writes, entries)
 }
 
 export function useDb(): DbState {
@@ -36,6 +54,16 @@ export function useDb(): DbState {
 }
 
 export const getDb = () => state
+
+export function useDbLoaded(): boolean {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l)
+      return () => listeners.delete(l)
+    },
+    () => loaded,
+  )
+}
 
 function by(actor: Actor): Pick<AuditDraft, 'uid' | 'name' | 'email' | 'role'> {
   return { uid: actor.uid, name: actor.name, email: actor.email, role: actor.role }
@@ -51,7 +79,7 @@ function requireAdmin(actor: Actor) {
 
 /** 로그인·로그아웃·내보내기처럼 데이터 변경이 없는 작업의 기록 */
 export function logEvent(actor: Actor, action: string, detail?: unknown) {
-  return backend.commit([], [audit(actor, action, 'session', actor.uid, { after: detail })])
+  return commit([], [audit(actor, action, 'session', actor.uid, { after: detail })])
 }
 
 export type RecipeInput = Omit<Recipe, 'id' | 'updatedAt' | 'updatedBy'> & { id?: string }
@@ -61,7 +89,7 @@ export async function saveRecipe(actor: Actor, input: RecipeInput, reason?: stri
   const id = input.id ?? newId()
   const before = state.recipes.find((r) => r.id === id)
   const data = { ...input, id, updatedAt: Date.now(), updatedBy: actor.uid }
-  await backend.commit(
+  await commit(
     [{ col: 'recipes', id, data }],
     [audit(actor, before ? '레시피 수정' : '레시피 생성', 'recipes', id, { before, after: data, reason })],
   )
@@ -105,7 +133,7 @@ export async function startBatch(actor: Actor, input: BatchInput): Promise<strin
     createdAt: Date.now(),
     createdBy: actor.uid,
   }
-  await backend.commit([{ col: 'batches', id, data: { ...batch } }], [audit(actor, '배치 시작', 'batches', id, { after: batch })])
+  await commit([{ col: 'batches', id, data: { ...batch } }], [audit(actor, '배치 시작', 'batches', id, { after: batch })])
   return id
 }
 
@@ -119,7 +147,7 @@ export async function updateBatch(
   const changed = Object.fromEntries(Object.entries(patch).filter(([k, v]) => before[k as keyof Batch] !== v))
   if (Object.keys(changed).length === 0) return
   const prev = Object.fromEntries(Object.keys(changed).map((k) => [k, before[k as keyof Batch]]))
-  await backend.commit([{ col: 'batches', id, data: changed }], [audit(actor, '배치 정보 변경', 'batches', id, { before: prev, after: changed })])
+  await commit([{ col: 'batches', id, data: changed }], [audit(actor, '배치 정보 변경', 'batches', id, { before: prev, after: changed })])
 }
 
 export interface IpcInput {
@@ -180,8 +208,10 @@ export async function addRecord(actor: Actor, batchId: string, dispenserId: Disp
   if (!batch) throw new Error('배치를 찾을 수 없습니다.')
   const seq = (batchRecords(state, batchId, dispenserId).at(-1)?.seq ?? 0) + 1
   const rec = buildRecord(state, actor, batch, dispenserId, input, seq)
-  await backend.commit([{ col: 'records', id: rec.id, data: { ...rec } }], [audit(actor, 'IPC 저장', 'records', rec.id, { after: rec })])
+  await commit([{ col: 'records', id: rec.id, data: { ...rec } }], [audit(actor, 'IPC 저장', 'records', rec.id, { after: rec })])
 }
+
+const IMPORT_CHUNK = 200
 
 export interface ImportRow {
   dispenserId: DispenserId
@@ -208,10 +238,14 @@ export async function importRecords(actor: Actor, batchId: string, rows: ImportR
     created.push(rec)
     working = { ...working, records: [...working.records, rec] }
   }
-  const writes: Write[] = created.map((r) => ({ col: 'records', id: r.id, data: { ...r } }))
-  await backend.commit(writes, [
-    audit(actor, '데이터 가져오기', 'batches', batchId, { after: { file, count: created.length, batchNo: batch.batchNo } }),
-  ])
+  // 한 번에 저장할 수 있는 문서 수에 맞춰 나눠 저장한다. 묶음마다 audit 기록이 하나씩 남는다
+  for (let i = 0; i < created.length; i += IMPORT_CHUNK) {
+    const part = created.slice(i, i + IMPORT_CHUNK)
+    await commit(
+      part.map((r) => ({ col: 'records', id: r.id, data: { ...r } })),
+      [audit(actor, '데이터 가져오기', 'batches', batchId, { after: { file, batchNo: batch.batchNo, from: i + 1, count: part.length, total: created.length } })],
+    )
+  }
   return created.length
 }
 
@@ -237,7 +271,7 @@ export async function requestCorrection(
     requestedByName: actor.name,
     requestedAt: Date.now(),
   }
-  await backend.commit([{ col: 'corrections', id: c.id, data: { ...c } }], [audit(actor, '정정 요청', 'corrections', c.id, { after: c, reason })])
+  await commit([{ col: 'corrections', id: c.id, data: { ...c } }], [audit(actor, '정정 요청', 'corrections', c.id, { after: c, reason })])
 }
 
 export async function reviewCorrection(actor: Actor, correctionId: string, approve: boolean, note: string) {
@@ -262,7 +296,7 @@ export async function reviewCorrection(actor: Actor, correctionId: string, appro
     if (batch) Object.assign(after, evaluate(batch, rec.materialType, next.weight))
     writes.push({ col: 'records', id: rec.id, data: after })
   }
-  await backend.commit(writes, [
+  await commit(writes, [
     audit(actor, approve ? '정정 승인' : '정정 반려', 'records', rec.id, {
       before: { [c.field]: c.oldValue },
       after,
@@ -276,7 +310,7 @@ export async function setExcluded(actor: Actor, recordId: string, excluded: bool
   const rec = state.records.find((r) => r.id === recordId)
   if (!rec) throw new Error('기록을 찾을 수 없습니다.')
   if (excluded && !reason.trim()) throw new Error('제외 사유를 입력하세요.')
-  await backend.commit(
+  await commit(
     [{ col: 'records', id: recordId, data: { excluded, excludeReason: excluded ? reason : '' } }],
     [audit(actor, excluded ? '이상치 제외' : '이상치 제외 취소', 'records', recordId, { before: { excluded: rec.excluded }, after: { excluded }, reason })],
   )
@@ -285,5 +319,5 @@ export async function setExcluded(actor: Actor, recordId: string, excluded: bool
 export async function saveUser(actor: Actor, user: UserProfile) {
   requireAdmin(actor)
   const before = state.users.find((u) => u.uid === user.uid)
-  await backend.commit([{ col: 'users', id: user.uid, data: { ...user } }], [audit(actor, '사용자 권한 변경', 'users', user.uid, { before, after: user })])
+  await commit([{ col: 'users', id: user.uid, data: { ...user } }], [audit(actor, '사용자 권한 변경', 'users', user.uid, { before, after: user })])
 }

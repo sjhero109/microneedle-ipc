@@ -28,3 +28,7 @@ data/seed/
 .env
 .env.*
 !.env.example
+
+.firebase/
+*-debug.log
+!.env.emulator

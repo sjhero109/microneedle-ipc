@@ -1,0 +1,106 @@
+rules_version = '2';
+
+// 마이크로니들 IPC 보안 규칙
+// - 로그인하고 users 문서가 있으며 active 인 사람만 읽고 쓸 수 있다
+// - 모든 데이터 쓰기는 같은 batch 안에 본인 이름의 auditLog 문서가 있어야 한다
+// - 삭제는 어디에서도 허용하지 않는다
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+    function me() {
+      return get(userPath()).data;
+    }
+    function active() {
+      return signedIn() && exists(userPath()) && me().active == true;
+    }
+    function admin() {
+      return active() && me().role == 'admin';
+    }
+    function auditPath(id) {
+      return /databases/$(database)/documents/auditLog/$(id);
+    }
+    // 이 쓰기와 함께, 본인이 새로 만드는 audit 기록이 같은 batch 에 들어 있어야 한다
+    function audited() {
+      let id = request.resource.data.auditId;
+      return id is string
+        && !exists(auditPath(id))
+        && existsAfter(auditPath(id))
+        && getAfter(auditPath(id)).data.uid == request.auth.uid;
+    }
+    function onlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    match /auditLog/{id} {
+      allow read: if admin() || (active() && resource.data.uid == request.auth.uid);
+      allow create: if active()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.name == me().name
+        && request.resource.data.role == me().role
+        && request.resource.data.at == request.time
+        && request.resource.data.action is string;
+      allow update, delete: if false;
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || admin());
+      allow list: if admin();
+      // 관리자가 자기 권한을 스스로 없애 아무도 관리할 수 없게 되는 일을 막는다
+      allow create, update: if admin() && audited()
+        && request.resource.data.role in ['user', 'admin']
+        && request.resource.data.active is bool
+        && !(uid == request.auth.uid
+             && (request.resource.data.role != 'admin' || request.resource.data.active != true));
+      allow delete: if false;
+    }
+
+    match /recipes/{id} {
+      allow read: if active();
+      allow create, update: if admin() && audited() && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /batches/{id} {
+      allow read: if active();
+      allow create: if active() && audited()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update: if active() && audited()
+        && onlyChanges(['drugName', 'baseName', 'shots', 'mfgDate', 'status', 'auditId']);
+      allow delete: if false;
+    }
+
+    match /records/{id} {
+      allow read: if active();
+      allow create: if active() && audited()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.excluded == false
+        && (request.resource.data.source == 'manual' || admin());
+      // 기록 수정은 관리자의 정정 승인과 이상치 제외뿐이다
+      allow update: if admin() && audited()
+        && onlyChanges(['tray', 'pulse', 'totalWeight', 'weight', 'devPct', 'band', 'pass',
+                        'excluded', 'excludeReason', 'auditId']);
+      allow delete: if false;
+    }
+
+    match /corrections/{id} {
+      allow read: if active();
+      allow create: if active() && audited()
+        && request.resource.data.requestedBy == request.auth.uid
+        && request.resource.data.requestedAt == request.time
+        && request.resource.data.status == 'pending';
+      allow update: if admin() && audited()
+        && resource.data.status == 'pending'
+        && request.resource.data.reviewedBy == request.auth.uid
+        && onlyChanges(['status', 'reviewedBy', 'reviewedByName', 'reviewedAt', 'reviewNote', 'auditId']);
+      allow delete: if false;
+    }
+  }
+}

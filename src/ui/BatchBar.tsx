@@ -11,8 +11,10 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const db = useDb()
   const actor = useActor()
   const recipes = db.recipes.filter((r) => r.active)
-  const [recipeId, setRecipeId] = useState(recipes[0]?.id ?? '')
-  const recipe = recipes.find((r) => r.id === recipeId)
+  // 레시피 목록은 화면이 뜬 뒤에 도착할 수 있으므로, 고르기 전에는 첫 레시피를 쓴다
+  const [picked, setRecipeId] = useState('')
+  const recipe = recipes.find((r) => r.id === picked) ?? recipes[0]
+  const recipeId = recipe?.id ?? ''
   const [batchNo, setBatchNo] = useState('')
   const [mfgDate, setMfgDate] = useState(today)
   const [drugName, setDrugName] = useState<string | null>(null)

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useActor } from '../data/auth'
+import { useActor, useAuth } from '../data/auth'
 import { exportWorkbook } from '../data/excel'
 import { logEvent, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Correction, IpcRecord } from '../data/types'
@@ -17,6 +17,7 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
   const [exReason, setExReason] = useState('')
+  const { confirm } = useAuth()
   const [error, setError] = useState('')
   const corrections = db.corrections.filter((c) => c.recordId === record.id)
   const trail = db.audit.filter((a) => a.targetId === record.id).sort((a, b) => a.at - b.at)
@@ -103,11 +104,11 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
         <>
           <h3 className="mt-5 mb-2 font-semibold">계산에서 제외</h3>
           {record.excluded ? (
-            <Button onClick={() => run(() => setExcluded(actor, record.id, false, '제외 취소'))}>제외 취소</Button>
+            <Button onClick={() => run(async () => (await confirm(), setExcluded(actor, record.id, false, '제외 취소')))}>제외 취소</Button>
           ) : (
             <div className="flex gap-2">
               <Input placeholder="제외 사유 (필수)" value={exReason} onChange={(e) => setExReason(e.target.value)} />
-              <Button variant="danger" disabled={!exReason.trim()} onClick={() => run(() => setExcluded(actor, record.id, true, exReason))}>
+              <Button variant="danger" disabled={!exReason.trim()} onClick={() => run(async () => (await confirm(), setExcluded(actor, record.id, true, exReason)))}>
                 제외
               </Button>
             </div>

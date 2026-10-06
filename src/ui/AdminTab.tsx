@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { useActor } from '../data/auth'
+import { useActor, useAuth } from '../data/auth'
+import { createAccount, firebaseEnabled } from '../data/firebase'
 import { exportWorkbook, parseImport, type ParsedSheet } from '../data/excel'
-import { importRecords, logEvent, reviewCorrection, saveRecipe, setExcluded, startBatch, useDb, type RecipeInput } from '../data/store'
-import type { Recipe } from '../data/types'
+import { importRecords, logEvent, reviewCorrection, saveRecipe, saveUser, setExcluded, startBatch, useDb, type RecipeInput } from '../data/store'
+import type { Recipe, Role, UserProfile } from '../data/types'
 import { DEFAULT_CRITERIA } from '../data/types'
 import { Button, Deviation, Field, Input, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
@@ -28,9 +29,11 @@ const BLANK: RecipeInput = {
 
 type NumKey = 'drugTarget' | 'baseTarget' | 'defaultShots' | 'adjustPct' | 'bandCenterPct' | 'passLowPct' | 'passHighPct' | 'pulseStep'
 
-function RecipeForm({ recipe, onDone }: { recipe: Recipe | null; onDone(): void }) {
+function RecipeForm({ recipe, first, onDone }: { recipe: Recipe | null; first: boolean; onDone(): void }) {
   const actor = useActor()
-  const init: RecipeInput = recipe ?? BLANK
+  const { confirm } = useAuth()
+  // 첫 레시피는 최초 적용 제품(고용량) 값으로 채워 둔다
+  const init: RecipeInput = recipe ?? (first ? { ...BLANK, name: '고용량', drugTarget: 6.11, baseTarget: 350, defaultDrugName: '고용량' } : BLANK)
   const [name, setName] = useState(init.name)
   const [drugName, setDrugName] = useState(init.defaultDrugName)
   const [baseName, setBaseName] = useState(init.defaultBaseName)
@@ -67,6 +70,7 @@ function RecipeForm({ recipe, onDone }: { recipe: Recipe | null; onDone(): void 
       if (!(v.passLowPct! < v.passHighPct!)) throw new Error('적합 범위의 하한은 상한보다 작아야 합니다.')
       if (!Number.isInteger(v.defaultShots) || v.defaultShots! < 1) throw new Error('IPC 배수는 1 이상의 정수입니다.')
       if (recipe && !reason.trim()) throw new Error('변경 사유를 입력하세요.')
+      await confirm()
       await saveRecipe(
         actor,
         {
@@ -136,7 +140,7 @@ function RecipeForm({ recipe, onDone }: { recipe: Recipe | null; onDone(): void 
 function Recipes() {
   const db = useDb()
   const [editing, setEditing] = useState<string | 'new' | null>(null)
-  if (editing) return <RecipeForm recipe={db.recipes.find((r) => r.id === editing) ?? null} onDone={() => setEditing(null)} />
+  if (editing) return <RecipeForm recipe={db.recipes.find((r) => r.id === editing) ?? null} first={db.recipes.length === 0} onDone={() => setEditing(null)} />
   return (
     <div className="flex flex-col gap-2">
       {db.recipes.map((r) => (
@@ -166,8 +170,10 @@ function Import() {
   const db = useDb()
   const actor = useActor()
   const recipes = db.recipes.filter((r) => r.active)
-  const [recipeId, setRecipeId] = useState(recipes[0]?.id ?? '')
-  const recipe = recipes.find((r) => r.id === recipeId)
+  // 레시피 목록은 화면이 뜬 뒤에 도착할 수 있으므로, 고르기 전에는 첫 레시피를 쓴다
+  const [picked, setRecipeId] = useState('')
+  const recipe = recipes.find((r) => r.id === picked) ?? recipes[0]
+  const recipeId = recipe?.id ?? ''
   const [batchNo, setBatchNo] = useState('')
   const [mfgDate, setMfgDate] = useState('')
   const [drugName, setDrugName] = useState<string | null>(null)
@@ -178,6 +184,7 @@ function Import() {
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const { confirm } = useAuth()
 
   const n = parseNum(shots)
   let sheets: ParsedSheet[] = []
@@ -201,6 +208,7 @@ function Import() {
       if (!recipe || !chosen || !file || !n) throw new Error('파일과 제품을 선택하세요.')
       if (!batchNo.trim()) throw new Error('배치번호를 입력하세요.')
       if (db.batches.some((b) => b.recipeId === recipe.id && b.batchNo === batchNo.trim())) throw new Error('같은 배치번호가 이미 있습니다. 다른 번호를 쓰세요.')
+      await confirm()
       const id = await startBatch(actor, {
         recipeId: recipe.id,
         batchNo: batchNo.trim(),
@@ -315,9 +323,11 @@ function Review() {
   const [error, setError] = useState('')
   const pending = db.corrections.filter((c) => c.status === 'pending')
   const outliers = db.records.filter((r) => r.outlier && !r.excluded).sort((a, b) => b.createdAt - a.createdAt)
+  const { confirm } = useAuth()
   const run = async (fn: () => Promise<void>) => {
     setError('')
     try {
+      await confirm()
       await fn()
     } catch (e) {
       setError(e instanceof Error ? e.message : '처리하지 못했습니다.')
@@ -432,6 +442,98 @@ function Audit() {
   )
 }
 
+function Users() {
+  const db = useDb()
+  const actor = useActor()
+  const { confirm } = useAuth()
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [role, setRole] = useState<Role>('user')
+  const [error, setError] = useState('')
+  const [msg, setMsg] = useState('')
+
+  if (!firebaseEnabled) return <p className="text-sm text-sub">시연 모드에서는 사용자 계정을 관리하지 않습니다.</p>
+
+  const run = async (fn: () => Promise<void>) => {
+    setError('')
+    setMsg('')
+    try {
+      await confirm()
+      await fn()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '처리하지 못했습니다.')
+    }
+  }
+  const change = (u: UserProfile, patch: Partial<UserProfile>) => run(() => saveUser(actor, { ...u, ...patch }))
+
+  return (
+    <div className="flex flex-col gap-4">
+      <ul className="flex flex-col gap-2">
+        {db.users.map((u) => (
+          <li key={u.uid} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="font-semibold">
+                {u.name} {!u.active && <span className="text-xs font-normal text-sub">(사용 중지)</span>}
+              </div>
+              <div className="truncate text-sm text-sub">{u.email}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Select className="!h-10 !w-auto" value={u.role} disabled={u.uid === actor.uid} onChange={(e) => change(u, { role: e.target.value as Role })}>
+                <option value="user">일반 사용자</option>
+                <option value="admin">관리자</option>
+              </Select>
+              <Button className="h-10 px-3 text-sm" disabled={u.uid === actor.uid} onClick={() => change(u, { active: !u.active })}>
+                {u.active ? '사용 중지' : '다시 사용'}
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <div>
+        <h3 className="mb-2 font-semibold">계정 추가</h3>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <Field label="이름">
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="이메일">
+            <Input type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+          <Field label="임시 비밀번호 (6자 이상)">
+            <Input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+          <Field label="권한">
+            <Select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+              <option value="user">일반 사용자</option>
+              <option value="admin">관리자</option>
+            </Select>
+          </Field>
+        </div>
+        <Button
+          variant="primary"
+          className="mt-2"
+          disabled={!name.trim() || !email.trim() || password.length < 6}
+          onClick={() =>
+            run(async () => {
+              const uid = await createAccount(email.trim(), password)
+              await saveUser(actor, { uid, name: name.trim(), email: email.trim(), role, active: true })
+              setMsg(name.trim() + " 계정을 만들었습니다.")
+              setName('')
+              setEmail('')
+              setPassword('')
+            })
+          }
+        >
+          계정 만들기
+        </Button>
+      </div>
+      {error && <p className="text-sm text-bad">{error}</p>}
+      {msg && <p className="text-sm text-good">{msg}</p>}
+    </div>
+  )
+}
+
 export function AdminTab() {
   const [section, setSection] = useState<Section>('recipes')
   return (
@@ -453,7 +555,7 @@ export function AdminTab() {
         {section === 'import' && <Import />}
         {section === 'review' && <Review />}
         {section === 'audit' && <Audit />}
-        {section === 'users' && <p className="text-sm text-sub">사용자 계정과 권한 관리는 Firebase 로그인을 연결한 뒤 이 화면에서 할 수 있습니다.</p>}
+        {section === 'users' && <Users />}
       </Panel>
     </div>
   )
