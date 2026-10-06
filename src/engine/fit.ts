@@ -9,11 +9,12 @@ const B_GRID_SIZE = 40
 const B_MIN_IMPROVEMENT = 0.02
 
 /** 과거 데이터가 없을 때: 비례 관계를 가정한 기본값 */
-export function defaultParams(target: number, pRef: number): ModelParams {
+export function defaultParams(target: number, pRef: number, shotsRef = 1): ModelParams {
   const R = (0.1 * target) ** 2
   return {
     b: pRef > 0 ? target / pRef : 1,
     R,
+    shotsRef,
     Q: 0.1 * R,
     drift: 0,
     pRef,
@@ -35,7 +36,7 @@ function innovations(batches: IpcPoint[][], b: number, q: number, pRef: number):
   const diffuse: EngineOptions = { ...DEFAULT_OPTIONS, p0Factor: 1e6, outlierSigma: Infinity }
   for (const pts of batches) {
     if (pts.length === 0) continue
-    const p: ModelParams = { b, R: 1, Q: q, drift: 0, pRef, L0: 0, n: 0, bReliable: true, source: 'history' }
+    const p: ModelParams = { b, R: 1, shotsRef: 1, Q: q, drift: 0, pRef, L0: 0, n: 0, bReliable: true, source: 'history' }
     const { steps } = runFilter(p, pts, diffuse)
     for (let i = 1; i < steps.length; i++) out.push(steps[i].innovation)
   }
@@ -121,7 +122,7 @@ export function fitParams(
   const pooled = driftFromPairs(batches)
   const drift = pooled.pairs >= 6 && Math.abs(pooled.drift) > 1.96 * pooled.se ? pooled.drift : 0
 
-  const params: ModelParams = { b: best.b, R, Q, drift, pRef, L0: 0, n: all.length, bReliable, source: 'history' }
+  const params: ModelParams = { b: best.b, R, shotsRef: median(all.map((p) => p.shots ?? 1)), Q, drift, pRef, L0: 0, n: all.length, bReliable, source: 'history' }
   const finals = batches.map((pts) => {
     const start = { ...params, L0: pts[0].weight - params.b * (pts[0].pulse - pRef) }
     return runFilter(start, pts, opts).state.L

@@ -4,7 +4,10 @@ export type Phase = 'startup' | 'routine'
 export interface IpcPoint {
   tray: number
   pulse: number
+  /** 1회 토출분으로 환산한 중량 */
   weight: number
+  /** 이 IPC에서 합산한 토출 횟수(배수). 많을수록 측정값이 덜 흔들린다 */
+  shots?: number
   phase?: Phase
   /** 관리자가 확정 제외한 기록 — 필터와 추정에서 빠진다 */
   excluded?: boolean
@@ -15,6 +18,8 @@ export interface ModelParams {
   b: number
   /** 관측 잡음 분산 (IPC 1회 값의 흔들림) */
   R: number
+  /** R을 추정한 기록들의 토출 횟수(배수) */
+  shotsRef: number
   /** 과정 잡음 분산 (IPC 사이 기준 수준의 움직임) */
   Q: number
   /** 트레이 1개당 수준 변화. 데이터로 확인될 때만 0이 아니다 */

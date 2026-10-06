@@ -25,10 +25,12 @@ export function step(
   const pred = predictState(params, prev, point.tray)
   const predicted = weightAt(params, pred.L, point.pulse)
   const innovation = point.weight - predicted
-  const S = pred.P + params.R
+  // 여러 번 토출해 합산한 값은 횟수에 비례해 덜 흔들린다
+  const R0 = (params.R * params.shotsRef) / (point.shots ?? params.shotsRef)
+  const S = pred.P + R0
   const limit = opts.outlierSigma * Math.sqrt(S)
   const outlier = Math.abs(innovation) > limit
-  const R = outlier ? params.R * (Math.abs(innovation) / limit) ** 2 : params.R
+  const R = outlier ? R0 * (Math.abs(innovation) / limit) ** 2 : R0
   const gain = pred.P / (pred.P + R)
   const state: FilterState = { L: pred.L + gain * innovation, P: (1 - gain) * pred.P, tray: point.tray }
   return { point, predicted, innovation, gain, outlier, levelAtPulse: weightAt(params, state.L, point.pulse), state }
