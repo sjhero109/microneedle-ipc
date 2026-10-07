@@ -34,7 +34,7 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
   const info: [string, string][] = [
     ['제품 / 배치', `${record.productName} / ${record.batchNo}`],
     ['토출기 / 물질', `${record.dispenserId} / ${record.materialName || '–'}`],
-    ['트레이 / 구분', `${record.tray} / ${record.phase === 'startup' ? '토출 개시 전' : '공정 중'}${record.test ? ' / 테스트' : ''}`],
+    ['트레이', `${record.tray}${record.test ? ' (테스트)' : ''}`],
     ['Pulse', String(record.pulse)],
     ['합산 중량', `${fmt(record.totalWeight, 3)} mg (같은 Pulse로 ${record.shots}회 토출)`],
     ['1회 중량 / 목표', `${fmt(record.weight, 3)} / ${fmt(record.target, 2)} mg`],
@@ -232,7 +232,7 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
         <table className="num w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs text-sub">
-              {['토출기', '#', '트레이-회차', '구분', 'Pulse', '합산 중량', '1회 중량', '편차', '판정', '추천 Pulse', '작성자', '작성시각'].map((h) => (
+              {['토출기', '#', '트레이-회차', '', 'Pulse', '합산 중량', '1회 중량', '편차', '판정', '추천 Pulse', '작성자', '작성시각'].map((h) => (
                 <th key={h} className="px-3 py-2 font-medium whitespace-nowrap">
                   {h}
                 </th>
@@ -245,10 +245,7 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
                 <td className="px-3 py-2">{r.dispenserId}</td>
                 <td className="px-3 py-2">{r.seq}</td>
                 <td className="px-3 py-2">{labels.get(r.id) ?? r.tray}</td>
-                <td className="px-3 py-2 whitespace-nowrap">
-                  {r.phase === 'startup' ? '개시 전' : '공정 중'}
-                  {r.test && <span className="ml-1 rounded bg-sunken px-1 text-xs">테스트</span>}
-                </td>
+                <td className="px-3 py-2 whitespace-nowrap">{r.test && <span className="rounded bg-sunken px-1 text-xs">테스트</span>}</td>
                 <td className="px-3 py-2">{r.pulse}</td>
                 <td className="px-3 py-2">{fmt(r.totalWeight, 2)}</td>
                 <td className="px-3 py-2">{fmt(r.weight, 3)}</td>
@@ -273,7 +270,6 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold">
                   {r.dispenserId} · 트레이 {labels.get(r.id) ?? r.tray}
-                  {r.phase === 'startup' && <span className="ml-1 text-xs font-normal text-sub">개시 전</span>}
                   {r.test && <span className="ml-1 text-xs font-normal text-sub">테스트</span>}
                 </span>
                 <Deviation devPct={r.devPct} band={r.band} />

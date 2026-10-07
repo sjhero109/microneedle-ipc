@@ -23,7 +23,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const [editing, setEditing] = useState(false)
   const [error, setError] = useState('')
 
-  const recent = [...db.batches].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6)
+  const saved = [...db.batches].sort((a, b) => (b.mfgDate || '').localeCompare(a.mfgDate || '') || b.createdAt - a.createdAt)
   const names = (key: 'drugName' | 'baseName') => [...new Set(db.batches.map((b) => b[key]).filter(Boolean))]
 
   if (batch && !editing) {
@@ -93,6 +93,21 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
 
   return (
     <div className="flex flex-col gap-2">
+      {!batch && (
+        <>
+          <Field label="기존 배치 불러오기" className="sm:max-w-md">
+            <Select value="" onChange={(e) => e.target.value && onSelect(e.target.value)} disabled={saved.length === 0}>
+              <option value="">{saved.length ? `배치를 선택하세요 (${saved.length}건)` : '저장된 배치가 없습니다'}</option>
+              {saved.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.mfgDate || '제조일자 없음'} · {b.batchNo} · {b.productName}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="mt-1 text-xs font-semibold text-sub">새 배치 시작</div>
+        </>
+      )}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-[1.2fr_1.2fr_1fr_1.2fr_1.2fr_0.8fr_auto] lg:items-end">
         <Field label="제품명">
           {batch ? (
@@ -171,17 +186,6 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
         </p>
       )}
       {error && <p className="text-sm text-bad">{error}</p>}
-      {!batch && recent.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-sub">최근 배치</span>
-          {recent.map((b) => (
-            <button key={b.id} type="button" onClick={() => onSelect(b.id)} className="num h-9 rounded-lg border border-line px-3 text-sm hover:bg-sunken">
-              {b.batchNo}
-              <span className="ml-1.5 text-xs text-sub">{b.mfgDate || b.productName}</span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   )
 }

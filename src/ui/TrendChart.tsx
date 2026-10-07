@@ -13,7 +13,6 @@ export interface TrendPoint {
   /** 필터 추정 수준(목표 대비 %) */
   levelPct: number | null
   band: Band
-  startup: boolean
   excluded: boolean
   /** 테스트 기록: 계산식에 반영하지 않는다 */
   test?: boolean
@@ -99,9 +98,9 @@ export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: T
             cx={x(i)}
             cy={y(p.pct)}
             r={hover === i ? 5.5 : 4}
-            fill={p.excluded || p.startup ? 'var(--panel)' : DOT[p.band]}
-            stroke={p.excluded ? 'var(--sub)' : p.startup ? DOT[p.band] : 'var(--panel)'}
-            strokeWidth={p.startup || p.excluded ? 2 : 1.5}
+            fill={p.excluded ? 'var(--panel)' : DOT[p.band]}
+            stroke={p.excluded ? 'var(--sub)' : 'var(--panel)'}
+            strokeWidth={p.excluded ? 2 : 1.5}
             strokeDasharray={p.draft ? '2 2' : undefined}
             opacity={p.excluded ? 0.5 : 1}
           />
@@ -115,8 +114,8 @@ export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: T
           측정값
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="inline-block size-2 rounded-full border-2 border-ink" />
-          토출 개시 전
+          <span className="inline-block size-2 rounded-full border-2 border-sub" />
+          테스트·제외
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="inline-block h-0.5 w-4 rounded bg-accent" />
@@ -134,7 +133,6 @@ export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: T
         >
           <div className="font-semibold">
             {h.draft ? '입력 중' : `${h.seq}번째`} · 트레이 {h.label ?? h.tray}
-            {h.startup ? ' · 개시 전' : ''}
           </div>
           <div className="num">
             측정 {fmt(h.pct, 1)}% ({signed(h.pct - 100)}%) {BAND_LABEL[h.band]}

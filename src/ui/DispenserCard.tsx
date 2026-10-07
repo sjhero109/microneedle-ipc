@@ -27,12 +27,16 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const saved = useMemo(() => dispenserView(db, batch, dispenser.id), [db, batch, dispenser.id])
   const last = saved.records.at(-1)
   const labels = useMemo(() => trayLabels(saved.records), [saved.records])
-  const passedOnce = saved.records.some((r) => r.pass && !unused(r))
+  const lastUsed = saved.records.filter((r) => !unused(r)).at(-1)
 
   const [tray, setTray] = useState(() => (last ? String(last.tray) : '1'))
-  const [pulse, setPulse] = useState(() => (last ? String(last.pulse) : ''))
+  // Pulse 입력란에는 추천값을 미리 넣어 둔다. 직전 IPC가 적합이면 조정하지 않으므로 쓰던 Pulse를 그대로 둔다
+  const [pulse, setPulse] = useState(() => {
+    const r = saved.recommendation
+    if (lastUsed) return String(lastUsed.pass || !r ? lastUsed.pulse : r.pulse)
+    return r ? String(r.pulse) : last ? String(last.pulse) : ''
+  })
   const [total, setTotal] = useState('')
-  const [phase, setPhase] = useState<Phase>(passedOnce ? 'routine' : 'startup')
   const [showAll, setShowAll] = useState(false)
   const [open, setOpen] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -42,6 +46,8 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const p = parseNum(pulse)
   const w = parseNum(total)
   const valid = t !== null && t >= 0 && p !== null && p > 0 && w !== null && w > 0
+  // 토출 개시 전 IPC는 1번 트레이에서 한다. 따로 고르지 않고 트레이번호로만 구분한다
+  const phase: Phase = t === 1 ? 'startup' : 'routine'
   const draft: IpcPoint | undefined = valid ? { tray: t, pulse: p, weight: w / saved.shots, shots: saved.shots, phase } : undefined
   // 테스트 값은 모델에 얹지 않으므로 추천과 추정 수준이 움직이지 않는다
   const view = draft && !testMode ? dispenserView(db, batch, dispenser.id, draft) : saved
@@ -62,7 +68,6 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         pct: (r.weight / saved.target) * 100,
         levelPct: s ? (s.levelAtPulse / saved.target) * 100 : null,
         band: r.band,
-        startup: r.phase === 'startup',
         excluded: unused(r),
         test: r.test,
       }
@@ -76,7 +81,6 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         pct: (draft.weight / saved.target) * 100,
         levelPct: s ? (s.levelAtPulse / saved.target) * 100 : null,
         band: verdict.band,
-        startup: phase === 'startup',
         excluded: testMode,
         test: testMode,
         draft: true,
@@ -92,7 +96,8 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
     try {
       await addRecord(actor, batch.id, dispenser.id, { tray: t, pulse: p, totalWeight: w, phase, test: testMode })
       setTotal('')
-      if (verdict?.pass && !testMode) setPhase('routine')
+      // 부적합이면 다음 IPC를 위해 추천 Pulse를 입력란에 넣어 둔다
+      if (!testMode && verdict && !verdict.pass && rec) setPulse(String(rec.pulse))
     } catch (e) {
       setError(e instanceof Error ? e.message : '저장하지 못했습니다.')
     } finally {
@@ -164,7 +169,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
           <Field label="트레이번호">
             <NumInput value={tray} onChange={(e) => setTray(e.target.value)} inputMode="numeric" />
           </Field>
-          <Field label="Pulse">
+          <Field label={rec && String(rec.pulse) === pulse ? 'Pulse (추천값)' : 'Pulse'}>
             <NumInput value={pulse} onChange={(e) => setPulse(e.target.value)} />
           </Field>
           <Field label={saved.shots > 1 ? `${saved.shots}회 합계 (mg)` : '중량 (mg)'}>
@@ -172,25 +177,9 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
           </Field>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex flex-1 rounded-lg border border-line p-0.5" role="radiogroup" aria-label="IPC 구분">
-            {(['startup', 'routine'] as const).map((ph) => (
-              <button
-                key={ph}
-                type="button"
-                role="radio"
-                aria-checked={phase === ph}
-                onClick={() => setPhase(ph)}
-                className={`h-10 flex-1 rounded-md text-sm font-medium ${phase === ph ? 'bg-ink text-panel' : 'text-sub'}`}
-              >
-                {ph === 'startup' ? '토출 개시 전' : '공정 중'}
-              </button>
-            ))}
-          </div>
-          <Button variant="primary" onClick={save} disabled={!valid || busy} className="px-5">
-            {testMode ? '테스트 저장' : '저장'}
-          </Button>
-        </div>
+        <Button variant="primary" onClick={save} disabled={!valid || busy}>
+          {testMode ? '테스트 저장' : '저장'}
+        </Button>
         {testMode && <p className="rounded-lg bg-warn/15 px-3 py-2 text-xs">테스트 중 – 이 값은 기록만 남고 추천 Pulse 계산에 반영되지 않습니다.</p>}
         {trayBack && <p className="text-xs text-bad">트레이번호가 직전 기록({last.tray})보다 작습니다.</p>}
         {error && <p className="text-xs text-bad">{error}</p>}
@@ -250,7 +239,6 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                     <td className="py-1.5">{r.seq}</td>
                     <td className="py-1.5">
                       {labels.get(r.id) ?? r.tray}
-                      {r.phase === 'startup' && <span className="ml-1 text-xs text-sub">개시 전</span>}
                       {r.test && <span className="ml-1 rounded bg-sunken px-1 text-xs">테스트</span>}
                     </td>
                     <td className="py-1.5">{r.pulse}</td>

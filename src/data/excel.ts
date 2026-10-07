@@ -3,7 +3,6 @@ import { trayLabels } from './model'
 import type { ImportRow } from './store'
 import type { AuditEntry, Batch, Correction, DispenserId, IpcRecord } from './types'
 
-const PHASE = { startup: '토출 개시 전', routine: '공정 중' } as const
 const BAND = { ok: '', yellow: '주의', red: '경고', purple: '이탈' } as const
 
 const time = (t?: number) => (t ? new Date(t).toLocaleString('ko-KR') : '')
@@ -25,7 +24,6 @@ export function exportWorkbook(
     순번: r.seq,
     트레이번호: r.tray,
     '트레이-회차': labels.get(r.id) ?? '',
-    구분: PHASE[r.phase],
     Pulse: r.pulse,
     'IPC 배수': r.shots,
     '합산 중량(mg)': r.totalWeight,
