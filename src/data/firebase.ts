@@ -5,6 +5,7 @@ import {
   EmailAuthProvider,
   getAuth,
   reauthenticateWithCredential,
+  signInWithEmailAndPassword,
   signOut,
   type Auth,
 } from 'firebase/auth'
@@ -60,6 +61,35 @@ export function services(): { auth: Auth; fs: Firestore } {
 export async function loadProfile(uid: string): Promise<UserProfile | null> {
   const snap = await getDoc(doc(services().fs, 'users', uid))
   return snap.exists() ? (snap.data() as UserProfile) : null
+}
+
+/**
+ * 앱에서 직접 가입한다. 맨 처음 가입한 사람은 관리자가 되고, 그 뒤로는 관리자 승인을 기다린다.
+ * 이미 있는 계정이면 그 계정으로 로그인해서 이어 간다.
+ */
+export async function signUp(name: string, email: string, password: string): Promise<void> {
+  const { auth, fs } = services()
+  let uid: string
+  try {
+    uid = (await createUserWithEmailAndPassword(auth, email, password)).user.uid
+  } catch (e) {
+    if ((e as { code?: string }).code !== 'auth/email-already-in-use') throw e
+    uid = (await signInWithEmailAndPassword(auth, email, password)).user.uid
+  }
+  if (await loadProfile(uid)) return
+  const first = !(await getDoc(doc(fs, 'meta', 'setup'))).exists()
+  const batch = writeBatch(fs)
+  batch.set(doc(fs, 'users', uid), {
+    uid,
+    name,
+    email,
+    role: first ? 'admin' : 'user',
+    active: first,
+    pending: !first,
+    createdAt: serverTimestamp(),
+  })
+  if (first) batch.set(doc(fs, 'meta', 'setup'), { uid, at: serverTimestamp() })
+  await batch.commit()
 }
 
 /** 중요 작업 전에 비밀번호를 다시 확인한다 (전자서명 역할) */

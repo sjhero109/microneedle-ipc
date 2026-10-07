@@ -34,6 +34,7 @@ export function exportWorkbook(
     '추천 Pulse': r.recommendedPulse ?? '',
     '추정 수준(mg)': r.model ? +r.model.level.toFixed(4) : '',
     이상치후보: r.outlier ? 'Y' : '',
+    테스트: r.test ? 'Y' : '',
     제외: r.excluded ? 'Y' : '',
     제외사유: r.excludeReason ?? '',
     입력경로: r.source === 'import' ? `가져오기(${r.importFile ?? ''})` : '직접 입력',
@@ -46,7 +47,7 @@ export function exportWorkbook(
   const sumRows = batches
     .filter((b) => ids.has(b.id))
     .flatMap((b) => {
-      const own = records.filter((r) => r.batchId === b.id && !r.excluded)
+      const own = records.filter((r) => r.batchId === b.id && !r.excluded && !r.test)
       return [...new Set(own.map((r) => r.dispenserId))].sort().map((d) => {
         const rs = own.filter((r) => r.dispenserId === d).sort((a, c) => a.seq - c.seq)
         const changes = rs.filter((r, i) => i > 0 && r.pulse !== rs[i - 1].pulse).length

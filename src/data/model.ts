@@ -6,6 +6,7 @@ import {
   isPass,
   median,
   recommend,
+  roundTo,
   type Band,
   type BatchModel,
   type IpcPoint,
@@ -15,8 +16,11 @@ import {
 import type { Batch, DbState, DispenserId, IpcRecord, MaterialType } from './types'
 import { DISPENSERS, materialOf, shotsOf, targetOf } from './types'
 
-export function toPoint(r: Pick<IpcRecord, 'tray' | 'pulse' | 'weight' | 'shots' | 'phase' | 'excluded'>): IpcPoint {
-  return { tray: r.tray, pulse: r.pulse, weight: r.weight, shots: r.shots, phase: r.phase, excluded: r.excluded }
+/** 계산식에 넣지 않는 기록: 관리자가 제외했거나 테스트로 남긴 기록 */
+export const unused = (r: Pick<IpcRecord, 'excluded' | 'test'>) => r.excluded || r.test === true
+
+export function toPoint(r: Pick<IpcRecord, 'tray' | 'pulse' | 'weight' | 'shots' | 'phase' | 'excluded' | 'test'>): IpcPoint {
+  return { tray: r.tray, pulse: r.pulse, weight: r.weight, shots: r.shots, phase: r.phase, excluded: unused(r) }
 }
 
 export function batchRecords(db: DbState, batchId: string, dispenserId: DispenserId): IpcRecord[] {
@@ -26,7 +30,7 @@ export function batchRecords(db: DbState, batchId: string, dispenserId: Dispense
 function groupByBatch(records: IpcRecord[]): IpcPoint[][] {
   const groups = new Map<string, IpcRecord[]>()
   for (const r of records) {
-    if (r.excluded) continue
+    if (unused(r)) continue
     groups.set(r.batchId, [...(groups.get(r.batchId) ?? []), r])
   }
   return [...groups.values()].map((g) => g.sort((a, b) => a.seq - b.seq).map(toPoint))
@@ -76,8 +80,12 @@ export interface DispenserView {
   records: IpcRecord[]
   prior: PriorInfo
   model: BatchModel
-  /** 기록이 하나도 없으면 null */
+  /** 과거 기록도, 이번 배치 기록도 없으면 null */
   recommendation: Recommendation | null
+  /** 추천의 기준이 된 Pulse: 이번 배치의 마지막 Pulse, 없으면 과거 기록의 기준 Pulse */
+  pulseNow: number | null
+  /** 이번 배치에서 계산에 쓴 기록 수 */
+  usedCount: number
   trayInterval: number
 }
 
@@ -99,17 +107,19 @@ export function dispenserView(db: DbState, batch: Batch, dispenserId: DispenserI
   }
   const trayInterval = gaps.length ? median(gaps) : 0
   const target = targetOf(batch, type)
-  const last = used[used.length - 1]
-  const recommendation = last
+  // 이번 배치 기록이 아직 없어도, 과거 기록이 있으면 그 기준으로 시작 Pulse를 추천한다
+  const pulseNow = used.at(-1)?.pulse ?? (prior.basis === 'default' ? null : roundTo(prior.params.pRef, batch.pulseStep))
+  const recommendation =
+    pulseNow !== null
     ? recommend({
         params: model.params,
         state: model.state,
-        pulseNow: last.pulse,
+        pulseNow,
         target,
         adjustPct: batch.adjustPct,
         trayInterval,
         pulseStep: batch.pulseStep,
       })
     : null
-  return { type, target, shots: shotsOf(batch, type), records, prior, model, recommendation, trayInterval }
+  return { type, target, shots: shotsOf(batch, type), records, prior, model, recommendation, trayInterval, pulseNow, usedCount: used.length }
 }

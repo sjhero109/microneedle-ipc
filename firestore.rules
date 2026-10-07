@@ -32,6 +32,21 @@ service cloud.firestore {
         && existsAfter(auditPath(id))
         && getAfter(auditPath(id)).data.uid == request.auth.uid;
     }
+    function setupPath() {
+      return /databases/$(database)/documents/meta/setup;
+    }
+    // 본인이 직접 가입한다. 맨 처음 가입한 사람만 관리자가 되고, 그 뒤로는 승인 대기 상태로만 만들 수 있다
+    function selfSignup(uid) {
+      let d = request.resource.data;
+      let first = !exists(setupPath()) && existsAfter(setupPath());
+      return signedIn() && uid == request.auth.uid
+        && d.uid == uid
+        && d.email == request.auth.token.email
+        && d.name is string
+        && d.createdAt == request.time
+        && ((d.role == 'user' && d.active == false && d.pending == true)
+            || (d.role == 'admin' && d.active == true && first));
+    }
     function onlyChanges(fields) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
@@ -52,12 +67,22 @@ service cloud.firestore {
       allow get: if signedIn() && (request.auth.uid == uid || admin());
       allow list: if admin();
       // 관리자가 자기 권한을 스스로 없애 아무도 관리할 수 없게 되는 일을 막는다
+      allow create: if selfSignup(uid);
       allow create, update: if admin() && audited()
         && request.resource.data.role in ['user', 'admin']
         && request.resource.data.active is bool
         && !(uid == request.auth.uid
              && (request.resource.data.role != 'admin' || request.resource.data.active != true));
       allow delete: if false;
+    }
+
+    // 최초 관리자 등록이 끝났다는 표시. 한 번 만들어지면 바꾸거나 지울 수 없다
+    match /meta/setup {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && getAfter(userPath()).data.role == 'admin';
+      allow update, delete: if false;
     }
 
     match /recipes/{id} {

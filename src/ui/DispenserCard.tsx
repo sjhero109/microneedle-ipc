@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useActor } from '../data/auth'
-import { dispenserView, evaluate } from '../data/model'
+import { dispenserView, evaluate, unused } from '../data/model'
 import { addRecord, useDb } from '../data/store'
 import type { Batch, DispenserId, MaterialType } from '../data/types'
 import { materialOf } from '../data/types'
@@ -14,12 +14,19 @@ const BASIS_NOTE = {
   default: '기준 데이터 없음 – 기본값 사용',
 } as const
 
-export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: { id: DispenserId; label: string; type: MaterialType } }) {
+interface Props {
+  batch: Batch
+  dispenser: { id: DispenserId; label: string; type: MaterialType }
+  /** 테스트: 저장은 하되 계산식에 반영하지 않는다 */
+  testMode: boolean
+}
+
+export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const db = useDb()
   const actor = useActor()
   const saved = useMemo(() => dispenserView(db, batch, dispenser.id), [db, batch, dispenser.id])
   const last = saved.records.at(-1)
-  const passedOnce = saved.records.some((r) => r.pass && !r.excluded)
+  const passedOnce = saved.records.some((r) => r.pass && !unused(r))
 
   const [tray, setTray] = useState(() => (last ? String(last.tray) : '1'))
   const [pulse, setPulse] = useState(() => (last ? String(last.pulse) : ''))
@@ -35,16 +42,17 @@ export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: {
   const w = parseNum(total)
   const valid = t !== null && t >= 0 && p !== null && p > 0 && w !== null && w > 0
   const draft: IpcPoint | undefined = valid ? { tray: t, pulse: p, weight: w / saved.shots, shots: saved.shots, phase } : undefined
-  const view = draft ? dispenserView(db, batch, dispenser.id, draft) : saved
+  // 테스트 값은 모델에 얹지 않으므로 추천과 추정 수준이 움직이지 않는다
+  const view = draft && !testMode ? dispenserView(db, batch, dispenser.id, draft) : saved
   const verdict = draft ? evaluate(batch, dispenser.type, draft.weight) : null
-  const step = draft ? view.model.steps.at(-1) : undefined
+  const step = draft && !testMode ? view.model.steps.at(-1) : undefined
   const rec = view.recommendation
   const levelDev = (v: number) => evaluate(batch, dispenser.type, v)
 
   const points: TrendPoint[] = (() => {
     const steps = [...view.model.steps]
     const rows: TrendPoint[] = saved.records.map((r) => {
-      const s = r.excluded ? undefined : steps.shift()
+      const s = unused(r) ? undefined : steps.shift()
       return {
         seq: r.seq,
         tray: r.tray,
@@ -53,11 +61,12 @@ export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: {
         levelPct: s ? (s.levelAtPulse / saved.target) * 100 : null,
         band: r.band,
         startup: r.phase === 'startup',
-        excluded: r.excluded,
+        excluded: unused(r),
+        test: r.test,
       }
     })
     if (draft && verdict) {
-      const s = steps.shift()
+      const s = testMode ? undefined : steps.shift()
       rows.push({
         seq: rows.length + 1,
         tray: draft.tray,
@@ -66,7 +75,8 @@ export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: {
         levelPct: s ? (s.levelAtPulse / saved.target) * 100 : null,
         band: verdict.band,
         startup: phase === 'startup',
-        excluded: false,
+        excluded: testMode,
+        test: testMode,
         draft: true,
       })
     }
@@ -78,9 +88,9 @@ export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: {
     setBusy(true)
     setError('')
     try {
-      await addRecord(actor, batch.id, dispenser.id, { tray: t, pulse: p, totalWeight: w, phase })
+      await addRecord(actor, batch.id, dispenser.id, { tray: t, pulse: p, totalWeight: w, phase, test: testMode })
       setTotal('')
-      if (verdict?.pass) setPhase('routine')
+      if (verdict?.pass && !testMode) setPhase('routine')
     } catch (e) {
       setError(e instanceof Error ? e.message : '저장하지 못했습니다.')
     } finally {
@@ -93,21 +103,57 @@ export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: {
   const rows = showAll ? saved.records : saved.records.slice(-4)
   const accent = dispenser.type === 'drug' ? 'border-t-drug' : 'border-t-base'
   const totalTarget = saved.target * saved.shots
+  const adjustTarget = (saved.target * batch.adjustPct) / 100
+  const historyCount = view.prior.params.n
 
   return (
     <article className={`flex min-w-0 flex-col rounded-xl border border-t-4 border-line bg-panel ${accent}`}>
       <button type="button" className="flex items-start justify-between gap-2 px-4 pt-3 pb-2 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span className="min-w-0">
           <span className="block font-semibold">{dispenser.label}</span>
-          <span className="num block truncate text-xs text-sub">
+          <span className="num block text-xs text-sub">
             {materialOf(batch, dispenser.type) || '물질명 미입력'} · 목표 {fmt(saved.target, 2)} mg
-            {saved.shots > 1 ? ` × ${saved.shots} = ${fmt(totalTarget, 2)} mg` : ''}
+            {saved.shots > 1 ? ` · 같은 Pulse로 ${saved.shots}회 = ${fmt(totalTarget, 2)} mg` : ''}
           </span>
         </span>
         <span className="num shrink-0 text-xs text-sub">
           IPC {saved.records.length}건 <span className="lg:hidden">{open ? '▲' : '▼'}</span>
         </span>
       </button>
+
+      {/* 추천 Pulse: 카드를 접어도 항상 보인다 */}
+      <div className="mx-4 mb-3 rounded-xl border-2 border-accent/50 bg-accent/5 px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-accent">추천 Pulse</span>
+          <span className="num text-xs text-sub">
+            목표의 {batch.adjustPct}% = {fmt(adjustTarget, 3)} mg
+          </span>
+        </div>
+        {rec && view.pulseNow !== null ? (
+          <>
+            <div className="mt-1 flex items-end justify-between gap-3">
+              <span className="num text-4xl leading-none font-bold tracking-tight">{rec.pulse}</span>
+              <Button variant="primary" onClick={() => setPulse(String(rec.pulse))} className="h-10 px-3 text-sm" disabled={String(rec.pulse) === pulse}>
+                Pulse에 적용
+              </Button>
+            </div>
+            <div className="num mt-2 text-sm">
+              {view.usedCount > 0 ? '현재' : '기준'} Pulse {view.pulseNow}
+              <span className="mx-1 text-sub">대비</span>
+              <span className="font-semibold">{signed(rec.delta, 3)}</span>
+              <span className="ml-2 text-sub">
+                (지금 추정 {fmt(rec.expectedNow, 3)} mg, {signed((rec.expectedNow / saved.target - 1) * 100)}%)
+              </span>
+            </div>
+            <div className="num mt-0.5 text-xs text-sub">
+              누적 {historyCount + view.usedCount}건 기준 · 과거 {historyCount}건 + 이번 배치 {view.usedCount}건
+              {!view.model.params.bReliable && ' · 감도 신뢰도 낮음'}
+            </div>
+          </>
+        ) : (
+          <p className="mt-1 text-sm text-sub">누적 기록이 없습니다. 첫 IPC를 저장하면 추천 Pulse가 표시됩니다.</p>
+        )}
+      </div>
 
       <div className={`${open ? 'flex' : 'hidden'} flex-col gap-3 px-4 pb-4 lg:flex`}>
         {note && <p className="rounded-lg bg-sunken px-3 py-2 text-xs text-sub">{note}</p>}
@@ -119,7 +165,7 @@ export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: {
           <Field label="Pulse">
             <NumInput value={pulse} onChange={(e) => setPulse(e.target.value)} />
           </Field>
-          <Field label={saved.shots > 1 ? `${saved.shots}회 합계 (mg)` : "중량 (mg)"}>
+          <Field label={saved.shots > 1 ? `${saved.shots}회 합계 (mg)` : '중량 (mg)'}>
             <NumInput value={total} onChange={(e) => setTotal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />
           </Field>
         </div>
@@ -139,17 +185,18 @@ export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: {
               </button>
             ))}
           </div>
-          <Button variant="primary" onClick={save} disabled={!valid || busy} className="px-6">
-            저장
+          <Button variant="primary" onClick={save} disabled={!valid || busy} className="px-5">
+            {testMode ? '테스트 저장' : '저장'}
           </Button>
         </div>
+        {testMode && <p className="rounded-lg bg-warn/15 px-3 py-2 text-xs">테스트 중 – 이 값은 기록만 남고 추천 Pulse 계산에 반영되지 않습니다.</p>}
         {trayBack && <p className="text-xs text-bad">트레이번호가 직전 기록({last.tray})보다 작습니다.</p>}
         {error && <p className="text-xs text-bad">{error}</p>}
 
         {draft && verdict && (
           <div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-line px-3 py-2.5 text-sm">
             <div>
-              <div className="text-xs text-sub">측정값</div>
+              <div className="text-xs text-sub">측정값 (1회분)</div>
               <div className="num font-semibold">
                 {fmt(draft.weight, 3)} mg <Deviation devPct={verdict.devPct} band={verdict.band} />
               </div>
@@ -170,32 +217,12 @@ export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: {
               {step?.outlier ? (
                 <span className="font-semibold text-bad">⚠ 재측정 권장 – 예상 범위를 크게 벗어난 값입니다</span>
               ) : verdict.pass ? (
-                <span className="font-semibold text-good">✓ 적합 – {phase === 'startup' ? '토출 시작 가능' : '토출 지속'}</span>
+                <span className="font-semibold text-good">✓ 적합{testMode ? '' : ` – ${phase === 'startup' ? '토출 시작 가능' : '토출 지속'}`}</span>
               ) : (
-                <span className="font-semibold text-bad">✕ 부적합 – Pulse 조정 후 재IPC</span>
+                <span className="font-semibold text-bad">✕ 부적합{testMode ? '' : ' – Pulse 조정 후 재IPC'}</span>
               )}
               {step && <span className="num text-xs text-sub">이번 IPC 반영 {fmt(step.gain * 100, 0)}%</span>}
             </div>
-          </div>
-        )}
-
-        {rec && (
-          <div className="flex items-end justify-between gap-3 rounded-lg bg-sunken px-3 py-2.5">
-            <div className="min-w-0">
-              <div className="text-xs text-sub">
-                추천 Pulse <span className="num">(목표의 {batch.adjustPct}% = {fmt((saved.target * batch.adjustPct) / 100, 3)} mg)</span>
-              </div>
-              <div className="num flex flex-wrap items-baseline gap-x-2">
-                <span className="text-2xl font-bold">{rec.pulse}</span>
-                <span className="text-sm text-sub">
-                  현재 대비 {signed(rec.delta, 3)}
-                  {!view.model.params.bReliable && ' · 감도 신뢰도 낮음'}
-                </span>
-              </div>
-            </div>
-            <Button onClick={() => setPulse(String(rec.pulse))} className="h-10 px-3 text-sm" disabled={String(rec.pulse) === pulse}>
-              Pulse에 적용
-            </Button>
           </div>
         )}
 
@@ -216,11 +243,12 @@ export function DispenserCard({ batch, dispenser }: { batch: Batch; dispenser: {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className={`border-b border-line/60 ${r.excluded ? 'text-sub line-through' : ''}`}>
+                  <tr key={r.id} className={`border-b border-line/60 ${r.excluded ? 'text-sub line-through' : r.test ? 'text-sub' : ''}`}>
                     <td className="py-1.5">{r.seq}</td>
                     <td className="py-1.5">
                       {r.tray}
                       {r.phase === 'startup' && <span className="ml-1 text-xs text-sub">개시 전</span>}
+                      {r.test && <span className="ml-1 rounded bg-sunken px-1 text-xs">테스트</span>}
                     </td>
                     <td className="py-1.5">{r.pulse}</td>
                     <td className="py-1.5 text-right">{fmt(r.totalWeight, 2)}</td>

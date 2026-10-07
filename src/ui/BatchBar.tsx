@@ -32,7 +32,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       ['제조일자', batch.mfgDate],
       ['약액부명', batch.drugName || '–'],
       ['기저부명', batch.baseName || '–'],
-      ['약액부 IPC 배수', `${batch.shots}배 (${fmt(batch.drugTarget * batch.shots, 2)} mg)`],
+      ['약액부 IPC 배수', `같은 Pulse로 ${batch.shots}회 (${fmt(batch.drugTarget * batch.shots, 2)} mg)`],
     ]
     return (
       <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
@@ -165,7 +165,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       </div>
       {recipe && !batch && (
         <p className="num text-xs text-sub">
-          목표 중량: 약액부 {fmt(recipe.drugTarget, 2)} mg{shotsOk && n > 1 ? ` (IPC ${n}배 = ${fmt(recipe.drugTarget * n, 2)} mg)` : ''} · 기저부{' '}
+          목표 중량: 약액부 {fmt(recipe.drugTarget, 2)} mg{shotsOk && n > 1 ? ` (같은 Pulse로 ${n}회 토출한 합계 = ${fmt(recipe.drugTarget * n, 2)} mg)` : ''} · 기저부{' '}
           {fmt(recipe.baseTarget, 1)} mg
         </p>
       )}

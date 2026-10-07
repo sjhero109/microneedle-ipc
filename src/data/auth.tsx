@@ -1,7 +1,7 @@
-import { browserSessionPersistence, onAuthStateChanged, setPersistence, signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import { browserSessionPersistence, onAuthStateChanged, setPersistence, signInWithEmailAndPassword, signOut, type User } from 'firebase/auth'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button, Field, Input, Modal } from '../ui/common'
-import { firebaseBackend, firebaseEnabled, loadProfile, services, verifyPassword } from './firebase'
+import { firebaseBackend, firebaseEnabled, loadProfile, services, signUp as createOwnAccount, verifyPassword } from './firebase'
 import { clearBackend, logEvent, setBackend } from './store'
 import type { Actor, Role } from './types'
 
@@ -16,6 +16,10 @@ interface AuthState {
   error: string
   loginDemo(name: string, role: Role): void
   signIn(email: string, password: string): Promise<void>
+  /** 가입 신청. 맨 처음 가입한 사람은 관리자가 된다 */
+  signUp(name: string, email: string, password: string): Promise<void>
+  /** 오류가 아닌 안내 문구 (가입 신청 접수 등) */
+  notice: string
   logout(): Promise<void>
   /** 중요 작업 전에 비밀번호를 다시 확인한다. 취소하거나 틀리면 예외를 던진다 */
   confirm(): Promise<void>
@@ -71,36 +75,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 직접 로그인했을 때만 '로그인'을 기록한다 (새로고침으로 복원된 경우는 제외)
   const explicit = useRef(false)
 
+  const [notice, setNotice] = useState('')
+  // 가입 처리 중에는 users 문서가 아직 없으므로 로그인 상태 변화를 잠시 무시한다
+  const signingUp = useRef(false)
+
+  const enter = useCallback(async (user: User) => {
+    const { auth } = services()
+    try {
+      const profile = await loadProfile(user.uid)
+      if (!profile || !profile.active) {
+        await signOut(auth)
+        if (profile?.pending) setNotice('가입 신청이 접수되어 있습니다. 관리자가 승인하면 로그인할 수 있습니다.')
+        else setError('사용 권한이 없는 계정입니다. 관리자에게 문의하세요.')
+        return
+      }
+      const a: Actor = { uid: user.uid, name: profile.name, email: user.email ?? profile.email, role: profile.role }
+      setBackend(firebaseBackend(a))
+      setActor(a)
+      if (explicit.current) void logEvent(a, '로그인')
+      explicit.current = false
+    } catch {
+      await signOut(auth)
+      setError('사용자 정보를 읽지 못했습니다. 네트워크를 확인하세요.')
+    } finally {
+      setReady(true)
+    }
+  }, [])
+
   useEffect(() => {
     if (!firebaseEnabled) return
-    const { auth } = services()
-    return onAuthStateChanged(auth, async (user) => {
+    return onAuthStateChanged(services().auth, (user) => {
+      if (signingUp.current) return
       if (!user) {
         clearBackend()
         setActor(null)
         setReady(true)
         return
       }
-      try {
-        const profile = await loadProfile(user.uid)
-        if (!profile || !profile.active) {
-          await signOut(auth)
-          setError('사용 권한이 없는 계정입니다. 관리자에게 문의하세요.')
-          return
-        }
-        const a: Actor = { uid: user.uid, name: profile.name, email: user.email ?? profile.email, role: profile.role }
-        setBackend(firebaseBackend(a))
-        setActor(a)
-        if (explicit.current) void logEvent(a, '로그인')
-        explicit.current = false
-      } catch {
-        await signOut(auth)
-        setError('사용자 정보를 읽지 못했습니다. 네트워크를 확인하세요.')
-      } finally {
-        setReady(true)
-      }
+      void enter(user)
     })
-  }, [])
+  }, [enter])
 
   const loginDemo = useCallback((name: string, role: Role) => {
     const a: Actor = { uid: `local-${role}-${name}`, name, email: `${name}@local`, role }
@@ -115,6 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     setError('')
+    setNotice('')
     const { auth } = services()
     try {
       // 탭을 닫으면 로그인이 풀리게 한다 (공용 PC)
@@ -126,6 +141,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError('이메일 또는 비밀번호가 맞지 않습니다.')
     }
   }, [])
+
+  const signUp = useCallback(
+    async (name: string, email: string, password: string) => {
+      setError('')
+      setNotice('')
+      const { auth } = services()
+      signingUp.current = true
+      try {
+        await setPersistence(auth, browserSessionPersistence)
+        await createOwnAccount(name, email, password)
+        explicit.current = true
+        signingUp.current = false
+        if (auth.currentUser) await enter(auth.currentUser)
+      } catch (e) {
+        const code = (e as { code?: string }).code ?? ''
+        setError(
+          code === 'auth/weak-password'
+            ? '비밀번호는 6자 이상이어야 합니다.'
+            : code === 'auth/invalid-email'
+              ? '이메일 형식이 올바르지 않습니다.'
+              : code.startsWith('auth/')
+                ? '이미 가입된 이메일입니다. 비밀번호를 확인하세요.'
+                : '가입하지 못했습니다. 잠시 후 다시 시도하세요.',
+        )
+        if (auth.currentUser) await signOut(auth)
+      } finally {
+        signingUp.current = false
+      }
+    },
+    [enter],
+  )
 
   const leave = useCallback(
     async (action: string) => {
@@ -180,8 +226,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<AuthState>(
-    () => ({ mode: firebaseEnabled ? 'firebase' : 'demo', actor, ready, error, loginDemo, signIn, logout: () => leave('로그아웃'), confirm }),
-    [actor, ready, error, loginDemo, signIn, leave, confirm],
+    () => ({ mode: firebaseEnabled ? 'firebase' : 'demo', actor, ready, error, notice, loginDemo, signIn, signUp, logout: () => leave('로그아웃'), confirm }),
+    [actor, ready, error, notice, loginDemo, signIn, signUp, leave, confirm],
   )
   return (
     <Ctx.Provider value={value}>

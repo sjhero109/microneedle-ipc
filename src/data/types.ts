@@ -95,6 +95,8 @@ export interface IpcRecord {
   recommendedPulse: number | null
   model: { level: number; b: number; drift: number; gain: number; source: string } | null
   outlier: boolean
+  /** 테스트 기록: 기록은 남기되 계산식(현재 배치 추정과 과거 기준)에 반영하지 않는다 */
+  test?: boolean
   excluded: boolean
   excludeReason?: string
   source: 'manual' | 'import'
@@ -142,6 +144,8 @@ export interface UserProfile {
   email: string
   role: Role
   active: boolean
+  /** 가입 신청 후 관리자 승인을 기다리는 중 */
+  pending?: boolean
 }
 
 export interface DbState {

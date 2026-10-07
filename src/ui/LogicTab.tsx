@@ -22,7 +22,7 @@ export function LogicTab({ batch }: { batch: Batch | null }) {
   // 선택한 토출기에서 기록이 가장 많은 배치로 예측 방식을 비교한다
   const backtest = useMemo(() => {
     const groups = new Map<string, typeof db.records>()
-    for (const r of db.records) if (r.dispenserId === disp && !r.excluded) groups.set(r.batchId, [...(groups.get(r.batchId) ?? []), r])
+    for (const r of db.records) if (r.dispenserId === disp && !r.excluded && !r.test) groups.set(r.batchId, [...(groups.get(r.batchId) ?? []), r])
     const biggest = [...groups.values()].sort((a, b) => b.length - a.length)[0]
     if (!biggest || biggest.length < 15) return null
     const sorted = [...biggest].sort((a, b) => a.seq - b.seq)
@@ -42,8 +42,8 @@ export function LogicTab({ batch }: { batch: Batch | null }) {
           <li>
             <b>IPC 한 번의 값은 흔들립니다.</b> 그래서 측정값을 그대로 믿지 않고, 지금까지의 추정과 새 측정값을 섞어 기준 수준을 고칩니다.
             <Formula>새 수준 = 이전 수준 + 반영 비율 K × (측정값 − 예상값)</Formula>
-            반영 비율 K는 추정이 불확실할수록 커집니다. 새 배치의 첫 IPC는 약 80%를 반영하고, 기록이 쌓일수록 낮아져 안정됩니다. 약액부처럼 여러 번
-            토출해 합산한 값은 그만큼 덜 흔들리므로 더 많이 반영합니다.
+            반영 비율 K는 추정이 불확실할수록 커집니다. 새 배치의 첫 IPC는 약 80%를 반영하고, 기록이 쌓일수록 낮아져 안정됩니다. 약액부 IPC는 같은 Pulse로 여러 번
+            토출해 합산 중량을 재고, 계산에는 1회분(합계 ÷ 횟수)을 씁니다. 여러 번 합산한 값은 그만큼 덜 흔들리므로 더 많이 반영합니다.
           </li>
           <li>
             <b>과거 전체 기록은 출발점, 현재 배치 기록이 우선입니다.</b> 감도, 흔들림의 크기, 토출 중 감소량은 같은 토출기·같은 물질의 과거 배치 전체에서
@@ -59,7 +59,7 @@ export function LogicTab({ batch }: { batch: Batch | null }) {
           </li>
           <li>
             <b>예상 범위를 크게 벗어난 값</b>(예측 오차가 3σ 초과)은 "재측정 권장"으로 표시하고 반영 비율을 낮춥니다. 계산에서 완전히 빼는 것은 관리자가
-            사유를 남기고 확정할 때만 합니다.
+            사유를 남기고 확정할 때만 합니다. "테스트"로 저장한 값은 기록만 남고 계산에는 쓰지 않습니다.
           </li>
         </ol>
       </Panel>

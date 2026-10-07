@@ -13,6 +13,8 @@ export interface TrendPoint {
   band: Band
   startup: boolean
   excluded: boolean
+  /** 테스트 기록: 계산식에 반영하지 않는다 */
+  test?: boolean
   draft?: boolean
 }
 
@@ -137,7 +139,7 @@ export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: T
           </div>
           {h.levelPct !== null && <div className="num">추정 {fmt(h.levelPct, 1)}%</div>}
           <div className="num">Pulse {h.pulse}</div>
-          {h.excluded && <div>계산에서 제외됨</div>}
+          {h.test ? <div>테스트 기록 (계산에 미반영)</div> : h.excluded && <div>계산에서 제외됨</div>}
         </div>
       )}
     </div>

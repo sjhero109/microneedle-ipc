@@ -322,7 +322,7 @@ function Review() {
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
   const pending = db.corrections.filter((c) => c.status === 'pending')
-  const outliers = db.records.filter((r) => r.outlier && !r.excluded).sort((a, b) => b.createdAt - a.createdAt)
+  const outliers = db.records.filter((r) => r.outlier && !r.excluded && !r.test).sort((a, b) => b.createdAt - a.createdAt)
   const { confirm } = useAuth()
   const run = async (fn: () => Promise<void>) => {
     setError('')
@@ -474,7 +474,7 @@ function Users() {
           <li key={u.uid} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2.5">
             <div className="min-w-0">
               <div className="font-semibold">
-                {u.name} {!u.active && <span className="text-xs font-normal text-sub">(사용 중지)</span>}
+                {u.name} {!u.active && <span className="text-xs font-normal text-sub">({u.pending ? '승인 대기' : '사용 중지'})</span>}
               </div>
               <div className="truncate text-sm text-sub">{u.email}</div>
             </div>
@@ -483,8 +483,8 @@ function Users() {
                 <option value="user">일반 사용자</option>
                 <option value="admin">관리자</option>
               </Select>
-              <Button className="h-10 px-3 text-sm" disabled={u.uid === actor.uid} onClick={() => change(u, { active: !u.active })}>
-                {u.active ? '사용 중지' : '다시 사용'}
+              <Button className="h-10 px-3 text-sm" disabled={u.uid === actor.uid} onClick={() => change(u, { active: !u.active, pending: false })}>
+                {u.active ? '사용 중지' : u.pending ? '승인' : '다시 사용'}
               </Button>
             </div>
           </li>

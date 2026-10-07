@@ -155,6 +155,8 @@ export interface IpcInput {
   pulse: number
   totalWeight: number
   phase: Phase
+  /** 테스트 기록: 계산식에 반영하지 않는다 */
+  test?: boolean
 }
 
 function buildRecord(
@@ -169,8 +171,11 @@ function buildRecord(
   const type = DISPENSERS.find((d) => d.id === dispenserId)!.type
   const shots = shotsOf(batch, type)
   const weight = input.totalWeight / shots
-  const view = dispenserView(db, batch, dispenserId, { tray: input.tray, pulse: input.pulse, weight, shots, phase: input.phase })
-  const step = view.model.steps[view.model.steps.length - 1]
+  // 테스트 기록은 모델에 얹지 않는다
+  const view = input.test
+    ? dispenserView(db, batch, dispenserId)
+    : dispenserView(db, batch, dispenserId, { tray: input.tray, pulse: input.pulse, weight, shots, phase: input.phase })
+  const step = input.test ? undefined : view.model.steps[view.model.steps.length - 1]
   return {
     id: newId(),
     batchId: batch.id,
@@ -194,6 +199,7 @@ function buildRecord(
       ? { level: step.levelAtPulse, b: view.model.params.b, drift: view.model.params.drift, gain: step.gain, source: view.prior.basis }
       : null,
     outlier: step?.outlier ?? false,
+    test: input.test === true,
     excluded: false,
     source: 'manual',
     createdAt: Date.now(),
@@ -208,7 +214,7 @@ export async function addRecord(actor: Actor, batchId: string, dispenserId: Disp
   if (!batch) throw new Error('배치를 찾을 수 없습니다.')
   const seq = (batchRecords(state, batchId, dispenserId).at(-1)?.seq ?? 0) + 1
   const rec = buildRecord(state, actor, batch, dispenserId, input, seq)
-  await commit([{ col: 'records', id: rec.id, data: { ...rec } }], [audit(actor, 'IPC 저장', 'records', rec.id, { after: rec })])
+  await commit([{ col: 'records', id: rec.id, data: { ...rec } }], [audit(actor, rec.test ? 'IPC 저장 (테스트)' : 'IPC 저장', 'records', rec.id, { after: rec })])
 }
 
 const IMPORT_CHUNK = 200
@@ -319,5 +325,7 @@ export async function setExcluded(actor: Actor, recordId: string, excluded: bool
 export async function saveUser(actor: Actor, user: UserProfile) {
   requireAdmin(actor)
   const before = state.users.find((u) => u.uid === user.uid)
-  await commit([{ col: 'users', id: user.uid, data: { ...user } }], [audit(actor, '사용자 권한 변경', 'users', user.uid, { before, after: user })])
+  // 가입 시각은 처음 값 그대로 둔다
+  const { uid, name, email, role, active, pending } = user
+  await commit([{ col: 'users', id: uid, data: { uid, name, email, role, active, pending: pending ?? false } }], [audit(actor, '사용자 권한 변경', 'users', user.uid, { before, after: user })])
 }

@@ -13,7 +13,8 @@ type Tab = 'calc' | 'logic' | 'history' | 'admin'
 const BATCH_KEY = 'microneedle-ipc/batch'
 
 function Login() {
-  const { mode, loginDemo, signIn, error } = useAuth()
+  const { mode, loginDemo, signIn, signUp, error, notice } = useAuth()
+  const [joining, setJoining] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -42,22 +43,33 @@ function Login() {
 
   async function submit() {
     setBusy(true)
-    await signIn(email.trim(), password)
+    if (joining) await signUp(name.trim(), email.trim(), password)
+    else await signIn(email.trim(), password)
     setBusy(false)
   }
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-4 px-4">
       <h1 className="text-2xl font-bold">마이크로니들 IPC</h1>
+      {joining && (
+        <Field label="이름">
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+        </Field>
+      )}
       <Field label="이메일">
         <Input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
       </Field>
-      <Field label="비밀번호">
-        <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+      <Field label={joining ? '비밀번호 (6자 이상)' : '비밀번호'}>
+        <Input type="password" autoComplete={joining ? 'new-password' : 'current-password'} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
       </Field>
       {error && <p className="text-sm text-bad">{error}</p>}
-      <Button variant="primary" disabled={!email.trim() || !password || busy} onClick={submit}>
-        로그인
+      {notice && <p className="text-sm text-good">{notice}</p>}
+      <Button variant="primary" disabled={!email.trim() || !password || (joining && !name.trim()) || busy} onClick={submit}>
+        {joining ? '가입 신청' : '로그인'}
       </Button>
+      <button type="button" className="h-11 text-sm text-accent" onClick={() => setJoining((j) => !j)}>
+        {joining ? '이미 계정이 있습니다 – 로그인' : '계정이 없습니다 – 가입 신청'}
+      </button>
+      {joining && <p className="text-xs text-sub">가입 신청 후 관리자가 승인하면 사용할 수 있습니다. 처음 가입하는 사람은 관리자로 등록됩니다.</p>}
     </main>
   )
 }

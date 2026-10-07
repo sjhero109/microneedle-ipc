@@ -212,3 +212,81 @@ describe('가져오기 묶음 저장', () => {
     await assertSucceeds(b.commit())
   })
 })
+
+describe('앱에서 직접 가입', () => {
+  const NEW = { uid: 'new1', email: 'new@test.local' }
+  const fresh = () => env.authenticatedContext(NEW.uid, { email: NEW.email }).firestore() as unknown as Firestore
+  const profile = (over: Record<string, unknown> = {}) => ({
+    uid: NEW.uid,
+    name: '신규',
+    email: NEW.email,
+    role: 'user',
+    active: false,
+    pending: true,
+    createdAt: serverTimestamp(),
+    ...over,
+  })
+  const markSetupDone = () =>
+    env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore() as unknown as Firestore, 'meta', 'setup'), { uid: 'admin1' }))
+
+  function signup(data: Record<string, unknown>, withSetup: boolean) {
+    const db = fresh()
+    const b = writeBatch(db)
+    b.set(doc(db, 'users', NEW.uid), data)
+    if (withSetup) b.set(doc(db, 'meta', 'setup'), { uid: NEW.uid, at: serverTimestamp() })
+    return b.commit()
+  }
+
+  it('맨 처음 가입한 사람은 관리자가 된다', async () => {
+    await assertSucceeds(signup(profile({ role: 'admin', active: true, pending: false }), true))
+  })
+
+  it('최초 등록 표시 없이 관리자로 가입할 수 없다', async () => {
+    await assertFails(signup(profile({ role: 'admin', active: true, pending: false }), false))
+  })
+
+  it('최초 등록이 끝난 뒤에는 관리자로 가입할 수 없다', async () => {
+    await markSetupDone()
+    await assertFails(signup(profile({ role: 'admin', active: true, pending: false }), true))
+    await assertFails(signup(profile({ role: 'admin', active: true, pending: false }), false))
+  })
+
+  it('그 뒤 가입자는 승인 대기 상태로만 만들 수 있다', async () => {
+    await markSetupDone()
+    await assertSucceeds(signup(profile(), false))
+  })
+
+  it('스스로 사용 가능한 상태로 가입할 수 없다', async () => {
+    await markSetupDone()
+    await assertFails(signup(profile({ active: true }), false))
+    await assertFails(signup(profile({ pending: false, active: true }), false))
+  })
+
+  it('다른 사람 명의나 다른 이메일로 가입할 수 없다', async () => {
+    await markSetupDone()
+    const db = fresh()
+    await assertFails(setDoc(doc(db, 'users', 'someone-else'), profile({ uid: 'someone-else' })))
+    await assertFails(signup(profile({ email: 'admin@test.local' }), false))
+  })
+
+  it('승인 대기 중에는 아무것도 읽거나 쓸 수 없다', async () => {
+    await markSetupDone()
+    await signup(profile(), false)
+    await assertFails(getDoc(doc(fresh(), 'records', 'rec1')))
+    await assertFails(setDoc(doc(fresh(), 'users', NEW.uid), profile({ active: true }), { merge: true }))
+  })
+
+  it('관리자가 승인하면 사용할 수 있다', async () => {
+    await markSetupDone()
+    await signup(profile(), false)
+    await assertSucceeds(withAudit('admin', `users/${NEW.uid}`, { active: true, pending: false, role: 'user' }, { merge: true }))
+    await assertSucceeds(getDoc(doc(fresh(), 'records', 'rec1')))
+  })
+
+  it('최초 등록 표시는 바꾸거나 지울 수 없다', async () => {
+    await markSetupDone()
+    await assertFails(setDoc(doc(as('admin'), 'meta', 'setup'), { uid: 'admin1' }))
+    await assertFails(deleteDoc(doc(as('admin'), 'meta', 'setup')))
+    await assertFails(setDoc(doc(as('user'), 'meta', 'setup'), { uid: 'user1' }))
+  })
+})
