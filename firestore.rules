@@ -71,7 +71,7 @@ service cloud.firestore {
         && d.at == request.time
         && d.action is string;
     }
-    // 로그인 전에 남기는 audit 기록: 로그인 실패와 계정 잠금뿐이다
+    // 로그인 전에 남기는 audit 기록: 로그인 실패, 계정 잠금, 잠긴 관리자에게 보낸 재설정 메일뿐이다
     function loginFailureAudit() {
       let d = request.resource.data;
       return request.auth == null
@@ -80,7 +80,7 @@ service cloud.firestore {
         && d.name == ''
         && d.role == 'none'
         && d.email is string && d.email.size() < 200
-        && d.action in ['로그인 실패', '계정 잠금']
+        && d.action in ['로그인 실패', '계정 잠금', '재설정 메일 발송']
         && d.at == request.time;
     }
 
@@ -113,6 +113,14 @@ service cloud.firestore {
         || (signedIn()
           && request.auth.token.email == email
           && resource.data.locked != true
+          && request.resource.data.fails == 0
+          && request.resource.data.locked == false
+          && request.resource.data.updatedAt == request.time)
+        // 잠긴 관리자는 메일로 비밀번호를 다시 정한 뒤 스스로 푼다 (풀어 줄 다른 관리자가 없을 수 있다)
+        || (signedIn()
+          && request.auth.token.email == email
+          && profile().active == true
+          && profile().role == 'admin'
           && request.resource.data.fails == 0
           && request.resource.data.locked == false
           && request.resource.data.updatedAt == request.time)
@@ -158,6 +166,16 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && getAfter(userPath()).data.role == 'admin';
       allow update, delete: if false;
+    }
+
+    // 관리자 이메일의 해시 목록. 로그인 화면이 "잠긴 계정이 관리자인지" 알아보는 데만 쓴다
+    match /meta/admins {
+      allow get: if true;
+      allow create, update: if admin()
+        && request.resource.data.keys().hasOnly(['hashes', 'updatedAt'])
+        && request.resource.data.hashes is list
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
     }
 
     match /recipes/{id} {

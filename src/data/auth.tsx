@@ -6,8 +6,11 @@ import {
   clearLoginFailures,
   firebaseBackend,
   firebaseEnabled,
+  isAdminEmail,
+  lastPasswordChange,
   loadProfile,
   loginLock,
+  unlockOwnAccount,
   recordLoginFailure,
   services,
   signIn as signInAccount,
@@ -20,6 +23,7 @@ import { MAX_LOGIN_FAILS } from './types'
 
 /** 이 시간 동안 입력이 없으면 자동으로 로그아웃한다 */
 const IDLE_MS = 15 * 60 * 1000
+const LOCKED_ADMIN_MESSAGE = `로그인 ${MAX_LOGIN_FAILS}회 실패로 관리자 계정이 잠겼습니다. 가입한 이메일로 보낸 메일에서 새 비밀번호를 정한 뒤 로그인하면 잠금이 풀립니다.`
 const LOCKED_MESSAGE = `로그인 ${MAX_LOGIN_FAILS}회 실패로 계정이 잠겼습니다. 관리자에게 잠금 해제를 요청하세요.`
 /** 로그아웃 기록이 저장되기를 기다리는 최대 시간 */
 const LOGOUT_WAIT_MS = 3000
@@ -112,16 +116,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // 잠긴 계정은 비밀번호가 맞아도 들어올 수 없다. 잠기지 않았으면 실패 횟수를 지운다
       const email = (user.email ?? profile.email).toLowerCase()
       const lock = await loginLock(email)
+      let selfUnlocked = false
       if (lock.locked) {
-        await signOut(auth)
-        setError(LOCKED_MESSAGE)
-        return
-      }
-      if (lock.fails > 0) void clearLoginFailures(email).catch(() => {})
+        // 잠긴 관리자는 메일로 비밀번호를 다시 정한 경우에만 들어올 수 있다
+        const renewed = profile.role === 'admin' && (await lastPasswordChange(user)) > lock.updatedAt
+        if (!renewed) {
+          await signOut(auth)
+          setError(profile.role === 'admin' ? LOCKED_ADMIN_MESSAGE : LOCKED_MESSAGE)
+          return
+        }
+        await unlockOwnAccount(email)
+        selfUnlocked = true
+      } else if (lock.fails > 0) void clearLoginFailures(email).catch(() => {})
       const a: Actor = { uid: user.uid, name: profile.name, email: user.email ?? profile.email, role: profile.role }
       setBackend(firebaseBackend(a))
       setMustChange(profile.mustChangePassword === true)
       setActor(a)
+      if (selfUnlocked) void logEvent(a, '계정 잠금 해제 (비밀번호 재설정)')
       if (explicit.current) void logEvent(a, '로그인')
       explicit.current = false
     } catch {
@@ -162,10 +173,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNotice('')
     const { auth } = services()
     const key = email.toLowerCase()
+    let lockedAdmin = false
     try {
       if ((await loginLock(key)).locked) {
-        setError(LOCKED_MESSAGE)
-        return
+        if (!(await isAdminEmail(key))) {
+          setError(LOCKED_MESSAGE)
+          return
+        }
+        // 관리자는 메일로 정한 새 비밀번호인지 확인해야 하므로 로그인을 시도하게 둔다
+        lockedAdmin = true
       }
     } catch {
       // 잠금 여부를 읽지 못해도 로그인은 시도한다. 잠긴 계정은 규칙이 막는다
@@ -186,9 +202,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError('네트워크에 연결할 수 없습니다.')
         return
       }
+      if (lockedAdmin) {
+        setError(LOCKED_ADMIN_MESSAGE)
+        return
+      }
       try {
         const lock = await recordLoginFailure(key)
-        setError(lock.locked ? LOCKED_MESSAGE : `이메일 또는 비밀번호가 맞지 않습니다. (${lock.fails}/${MAX_LOGIN_FAILS}회 실패 – ${MAX_LOGIN_FAILS}회가 되면 계정이 잠깁니다)`)
+        setError(lock.mailed ? LOCKED_ADMIN_MESSAGE : lock.locked ? LOCKED_MESSAGE : `이메일 또는 비밀번호가 맞지 않습니다. (${lock.fails}/${MAX_LOGIN_FAILS}회 실패 – ${MAX_LOGIN_FAILS}회가 되면 계정이 잠깁니다)`)
       } catch {
         setError('이메일 또는 비밀번호가 맞지 않습니다.')
       }

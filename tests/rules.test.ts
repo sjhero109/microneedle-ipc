@@ -374,3 +374,34 @@ describe('비밀번호 초기화', () => {
     await assertFails(updateDoc(doc(as('user'), 'users', 'user1'), { mustChangePassword: true }))
   })
 })
+
+describe('잠긴 관리자의 복구', () => {
+  const anon = () => env.unauthenticatedContext().firestore() as unknown as Firestore
+  const lock = (email: string) =>
+    env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore() as unknown as Firestore, 'loginGuard', email), { email, fails: 5, locked: true }))
+  const cleared = (email: string) => ({ email, fails: 0, locked: false, updatedAt: serverTimestamp() })
+
+  it('잠긴 관리자는 스스로 풀 수 있지만 일반 사용자는 풀 수 없다', async () => {
+    await lock(PEOPLE.admin.email)
+    await lock(PEOPLE.user.email)
+    // 잠긴 동안에는 관리자도 데이터를 읽을 수 없다
+    await assertFails(getDoc(doc(as('admin'), 'records', 'rec1')))
+    await assertFails(setDoc(doc(as('user'), 'loginGuard', PEOPLE.user.email), cleared(PEOPLE.user.email)))
+    await assertFails(setDoc(doc(as('user'), 'loginGuard', PEOPLE.admin.email), cleared(PEOPLE.admin.email)))
+    await assertSucceeds(setDoc(doc(as('admin'), 'loginGuard', PEOPLE.admin.email), cleared(PEOPLE.admin.email)))
+    await assertSucceeds(getDoc(doc(as('admin'), 'records', 'rec1')))
+  })
+
+  it('관리자 해시 목록은 누구나 읽고 관리자만 쓴다', async () => {
+    const list = { hashes: ['abc'], updatedAt: serverTimestamp() }
+    await assertFails(setDoc(doc(as('user'), 'meta', 'admins'), list))
+    await assertFails(setDoc(doc(anon(), 'meta', 'admins'), list))
+    await assertSucceeds(setDoc(doc(as('admin'), 'meta', 'admins'), list))
+    await assertSucceeds(getDoc(doc(anon(), 'meta', 'admins')))
+  })
+
+  it('재설정 메일을 보낸 사실을 로그인 전에 기록할 수 있다', async () => {
+    const entry = { uid: '', name: '', email: PEOPLE.admin.email, role: 'none', action: '재설정 메일 발송', target: 'loginGuard', targetId: PEOPLE.admin.email, at: serverTimestamp() }
+    await assertSucceeds(setDoc(doc(anon(), 'auditLog', id('audit')), entry))
+  })
+})

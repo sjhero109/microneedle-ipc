@@ -96,11 +96,13 @@ export async function signIn(email: string, password: string): Promise<void> {
   const { auth } = services()
   const key = await passwordKey(email, password)
   let user: User
+  changedBeforeMigration = null
   try {
     user = (await signInWithEmailAndPassword(auth, email, key)).user
   } catch (e) {
     if (!isBadCredential(e)) throw e
     user = (await signInWithEmailAndPassword(auth, email, password)).user
+    changedBeforeMigration = await passwordUpdatedAt(user).catch(() => 0)
     await updatePassword(user, key)
   }
   // 초기화에 쓸 키를 항상 최신으로 맞춰 둔다. 실패해도 로그인은 계속한다
@@ -142,13 +144,38 @@ export async function signUp(name: string, email: string, password: string): Pro
 export interface LockState {
   fails: number
   locked: boolean
+  /** 마지막으로 바뀐 시각(ms). 잠긴 계정이면 잠긴 시각이다 */
+  updatedAt: number
+  /** 이번 실패로 관리자 계정이 잠겨 재설정 메일을 보냈는지 */
+  mailed?: boolean
 }
 
 /** 이메일의 로그인 실패 횟수와 잠금 여부 */
 export async function loginLock(email: string): Promise<LockState> {
   const snap = await getDoc(doc(services().fs, 'loginGuard', email))
   const d = snap.data()
-  return { fails: Number(d?.fails ?? 0), locked: d?.locked === true }
+  return { fails: Number(d?.fails ?? 0), locked: d?.locked === true, updatedAt: d?.updatedAt instanceof Timestamp ? d.updatedAt.toMillis() : 0 }
+}
+
+async function sha256(text: string): Promise<string> {
+  const bits = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  return [...new Uint8Array(bits)].map((x) => x.toString(16).padStart(2, '0')).join('')
+}
+
+/** 로그인 전에 "이 이메일이 관리자인지"만 알아본다. 목록에는 이메일이 아니라 해시가 들어 있다 */
+export async function isAdminEmail(email: string): Promise<boolean> {
+  const snap = await getDoc(doc(services().fs, 'meta', 'admins'))
+  const hashes: string[] = snap.data()?.hashes ?? []
+  return hashes.includes(await sha256(email.toLowerCase()))
+}
+
+/** 관리자 목록이 바뀌면 해시 목록을 맞춰 둔다 (관리자로 로그인해 있을 때) */
+export async function syncAdminList(users: UserProfile[]) {
+  const { fs } = services()
+  const hashes = (await Promise.all(users.filter((u) => u.role === 'admin' && u.active).map((u) => sha256(u.email.toLowerCase())))).sort()
+  const snap = await getDoc(doc(fs, 'meta', 'admins'))
+  if (JSON.stringify(snap.data()?.hashes ?? null) === JSON.stringify(hashes)) return
+  await setDoc(doc(fs, 'meta', 'admins'), { hashes, updatedAt: serverTimestamp() })
 }
 
 /**
@@ -159,14 +186,44 @@ export async function recordLoginFailure(email: string): Promise<LockState> {
   const { fs } = services()
   const cur = await loginLock(email)
   if (cur.locked) return cur
-  const next: LockState = { fails: cur.fails + 1, locked: cur.fails + 1 >= MAX_LOGIN_FAILS }
+  const next: LockState = { fails: cur.fails + 1, locked: cur.fails + 1 >= MAX_LOGIN_FAILS, updatedAt: Date.now() }
   const batch = writeBatch(fs)
-  batch.set(doc(fs, 'loginGuard', email), { email, ...next, updatedAt: serverTimestamp() })
+  batch.set(doc(fs, 'loginGuard', email), { email, fails: next.fails, locked: next.locked, updatedAt: serverTimestamp() })
   const entry = { uid: '', name: '', email, role: 'none', target: 'loginGuard', targetId: email, at: serverTimestamp() }
   batch.set(doc(collection(fs, 'auditLog')), { ...entry, action: '로그인 실패', after: { fails: next.fails } })
   if (next.locked) batch.set(doc(collection(fs, 'auditLog')), { ...entry, action: '계정 잠금', after: { fails: next.fails } })
   await batch.commit()
+  // 관리자 계정이 잠기면 풀어 줄 사람이 없을 수 있으므로, 가입한 이메일로 재설정 메일을 바로 보낸다
+  if (next.locked && (await isAdminEmail(email).catch(() => false))) {
+    await sendPasswordResetEmail(services().auth, email)
+    await setDoc(doc(collection(fs, 'auditLog')), { ...entry, action: '재설정 메일 발송', after: { reason: '관리자 계정 잠금' } }).catch(() => {})
+    next.mailed = true
+  }
   return next
+}
+
+/** 잠긴 관리자가 메일로 비밀번호를 다시 정하고 들어왔을 때 잠금을 푼다 */
+export async function unlockOwnAccount(email: string) {
+  await clearLoginFailures(email)
+}
+
+/** 비밀번호가 마지막으로 바뀐 시각(ms). 잠긴 뒤에 비밀번호를 다시 정했는지 확인하는 데 쓴다 */
+async function passwordUpdatedAt(user: User): Promise<number> {
+  const base = EMULATOR ? 'http://127.0.0.1:9099/identitytoolkit.googleapis.com' : 'https://identitytoolkit.googleapis.com'
+  const res = await fetch(`${base}/v1/accounts:lookup?key=${config!.apiKey}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ idToken: await user.getIdToken() }),
+  })
+  const body = await res.json()
+  return Number(body.users?.[0]?.passwordUpdatedAt ?? 0)
+}
+
+// 예전 방식 계정은 로그인 직후 키 방식으로 바꾸면서 변경 시각이 새로 찍히므로, 바꾸기 전 값을 잡아 둔다
+let changedBeforeMigration: number | null = null
+
+export async function lastPasswordChange(user: User): Promise<number> {
+  return changedBeforeMigration ?? (await passwordUpdatedAt(user))
 }
 
 /** 로그인에 성공하면 실패 횟수를 0으로 되돌린다 */
@@ -285,6 +342,7 @@ export function firebaseBackend(actor: Actor): Backend {
             const rows = snap.docs.map((d) => ({ ...plain(d.data({ serverTimestamps: 'estimate' })), [key === 'users' ? 'uid' : 'id']: d.id }))
             if (key === 'audit') rows.sort((a, b) => (a as { at: number }).at - (b as { at: number }).at)
             state = { ...state, [key]: rows }
+            if (key === 'users') void syncAdminList(rows as unknown as UserProfile[]).catch(() => {})
             waiting.delete(key)
             if (waiting.size === 0) cb(state)
           },
