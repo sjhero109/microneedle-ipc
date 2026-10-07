@@ -6,7 +6,7 @@ import { batchRecords, dispenserView, evaluate } from './model'
 import type { Actor, Batch, Correction, DbState, DispenserId, IpcRecord, Recipe, UserProfile } from './types'
 import { DISPENSERS, materialOf, shotsOf, targetOf } from './types'
 
-const EMPTY: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [] }
+const EMPTY: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [] }
 
 let backend: Backend | null = null
 let state: DbState = EMPTY
@@ -221,7 +221,7 @@ export async function addRecord(actor: Actor, batchId: string, dispenserId: Disp
  * 한 번에 저장하는 기록 수. 보안 규칙이 기록마다 사용자·audit 문서를 확인하는데,
  * 실제 서버는 한 묶음에서 확인할 수 있는 문서 수가 20건으로 제한되어 있어 작게 나눈다.
  */
-const IMPORT_CHUNK = 3
+const IMPORT_CHUNK = 2
 
 export interface ImportRow {
   dispenserId: DispenserId
@@ -343,10 +343,36 @@ export async function setExcluded(actor: Actor, recordId: string, excluded: bool
   )
 }
 
+/** 로그인 실패로 잠긴 계정을 관리자가 푼다 */
+export async function unlockAccount(actor: Actor, email: string) {
+  requireAdmin(actor)
+  const before = state.guards.find((g) => g.id === email)
+  await commit(
+    [{ col: 'guards', id: email, data: { email, fails: 0, locked: false, updatedAt: Date.now() } }],
+    [audit(actor, '계정 잠금 해제', 'loginGuard', email, { before: before && { fails: before.fails, locked: before.locked }, after: { fails: 0, locked: false } })],
+  )
+}
+
+/** 비밀번호를 초기화한 사실을 남기고, 다음 로그인 때 새 비밀번호를 정하게 한다 */
+export async function markPasswordReset(actor: Actor, user: UserProfile) {
+  requireAdmin(actor)
+  await commit(
+    [{ col: 'users', id: user.uid, data: { mustChangePassword: true } }],
+    [audit(actor, '비밀번호 초기화', 'users', user.uid, { after: { email: user.email, mustChangePassword: true } })],
+  )
+}
+
+/** 데이터 변경은 없지만 대상이 있는 관리자 작업의 기록 (예: 비밀번호 재설정 메일 발송) */
+export function logAdminAction(actor: Actor, action: string, target: string, targetId: string, detail?: unknown) {
+  requireAdmin(actor)
+  return commit([], [audit(actor, action, target, targetId, { after: detail })])
+}
+
 export async function saveUser(actor: Actor, user: UserProfile) {
   requireAdmin(actor)
   const before = state.users.find((u) => u.uid === user.uid)
   // 가입 시각은 처음 값 그대로 둔다
   const { uid, name, email, role, active, pending } = user
-  await commit([{ col: 'users', id: uid, data: { uid, name, email, role, active, pending: pending ?? false } }], [audit(actor, '사용자 권한 변경', 'users', user.uid, { before, after: user })])
+  const flag = user.mustChangePassword === undefined ? {} : { mustChangePassword: user.mustChangePassword }
+  await commit([{ col: 'users', id: uid, data: { uid, name, email, role, active, pending: pending ?? false, ...flag } }], [audit(actor, '사용자 권한 변경', 'users', user.uid, { before, after: user })])
 }

@@ -5,7 +5,8 @@ import type { Role } from './data/types'
 import { AdminTab } from './ui/AdminTab'
 import { BatchBar } from './ui/BatchBar'
 import { CalcTab } from './ui/CalcTab'
-import { Button, Field, Input } from './ui/common'
+import { ChangePassword } from './ui/ChangePassword'
+import { Button, Field, Input, Modal } from './ui/common'
 import { HistoryTab } from './ui/HistoryTab'
 import { LogicTab } from './ui/LogicTab'
 
@@ -64,18 +65,19 @@ function Login() {
       {error && <p className="text-sm text-bad">{error}</p>}
       {notice && <p className="text-sm text-good">{notice}</p>}
       <Button variant="primary" disabled={!email.trim() || !password || (joining && !name.trim()) || busy} onClick={submit}>
-        {joining ? '가입 신청' : '로그인'}
+        {joining ? '회원가입' : '로그인'}
       </Button>
       <button type="button" className="h-11 text-sm text-accent" onClick={() => setJoining((j) => !j)}>
-        {joining ? '이미 계정이 있습니다 – 로그인' : '계정이 없습니다 – 가입 신청'}
+        {joining ? '로그인으로 돌아가기' : '회원가입'}
       </button>
-      {joining && <p className="text-xs text-sub">가입 신청 후 관리자가 승인하면 사용할 수 있습니다. 처음 가입하는 사람은 관리자로 등록됩니다.</p>}
+      {joining && <p className="text-xs text-sub">가입한 뒤 관리자가 승인하면 사용할 수 있습니다.</p>}
     </main>
   )
 }
 
 function Shell() {
-  const { actor, logout, ready } = useAuth()
+  const { actor, logout, ready, mustChange, mode } = useAuth()
+  const [changing, setChanging] = useState(false)
   const db = useDb()
   const loaded = useDbLoaded()
   const [tab, setTab] = useState<Tab>('calc')
@@ -88,6 +90,14 @@ function Shell() {
   })
   if (!ready) return <p className="p-8 text-center text-sub">불러오는 중…</p>
   if (!actor) return <Login />
+  if (mustChange) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-4 px-4">
+        <h1 className="text-2xl font-bold">비밀번호 변경</h1>
+        <ChangePassword forced />
+      </main>
+    )
+  }
   if (!loaded) return <p className="p-8 text-center text-sub">불러오는 중…</p>
 
   const batch = db.batches.find((b) => b.id === batchId) ?? null
@@ -118,6 +128,11 @@ function Shell() {
               <span className="block font-medium">{actor.name}</span>
               <span className="block text-xs text-sub">{actor.role === 'admin' ? '관리자' : '일반 사용자'}</span>
             </span>
+            {mode === 'firebase' && (
+              <Button className="h-9 px-3 text-sm" onClick={() => setChanging(true)}>
+                비밀번호 변경
+              </Button>
+            )}
             <Button className="h-9 px-3 text-sm" onClick={() => void logout()}>
               로그아웃
             </Button>
@@ -154,6 +169,12 @@ function Shell() {
         )}
         {tab === 'admin' && actor.role === 'admin' && <AdminTab />}
       </main>
+
+      {changing && (
+        <Modal title="비밀번호 변경" onClose={() => setChanging(false)}>
+          <ChangePassword onDone={() => setChanging(false)} />
+        </Modal>
+      )}
 
       <footer className="text-center text-xs text-sub">공정 보조 계산 도구 – 최종 판단과 공식 기록은 작업자와 공식 기록서 기준</footer>
     </div>

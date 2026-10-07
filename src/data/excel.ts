@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx'
 import { trayLabels } from './model'
 import type { ImportRow } from './store'
 import type { AuditEntry, Batch, Correction, DispenserId, IpcRecord } from './types'
+import { roleLabel } from './types'
 
 const BAND = { ok: '', yellow: '주의', red: '경고', purple: '이탈' } as const
 
@@ -91,7 +92,7 @@ export function exportWorkbook(
     시각: time(a.at),
     이름: a.name,
     계정: a.email,
-    권한: a.role === 'admin' ? '관리자' : '일반 사용자',
+    권한: roleLabel(a.role),
     작업: a.action,
     대상: a.target,
     대상ID: a.targetId,

@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // 마이크로니들 IPC 보안 규칙
-// - 로그인하고 users 문서가 있으며 active 인 사람만 읽고 쓸 수 있다
+// - 로그인하고 users 문서가 있으며 active 이고, 로그인 실패로 잠기지 않은 사람만 읽고 쓸 수 있다
 // - 모든 데이터 쓰기는 같은 batch 안에 본인 이름의 auditLog 문서가 있어야 한다
 // - 삭제는 어디에서도 허용하지 않는다
 service cloud.firestore {
@@ -12,14 +12,23 @@ service cloud.firestore {
     function userPath() {
       return /databases/$(database)/documents/users/$(request.auth.uid);
     }
-    function me() {
+    // users 문서가 없으면 읽기 오류가 나고, 그 규칙은 거부된다
+    function profile() {
       return get(userPath()).data;
     }
+    function guardPath() {
+      return /databases/$(database)/documents/loginGuard/$(request.auth.token.email);
+    }
+    // 로그인 실패가 쌓여 잠긴 계정은 비밀번호가 맞아도 아무것도 할 수 없다
+    function unlocked() {
+      return !exists(guardPath()) || get(guardPath()).data.locked != true;
+    }
     function active() {
-      return signedIn() && exists(userPath()) && me().active == true;
+      return signedIn() && profile().active == true && unlocked();
     }
     function admin() {
-      return active() && me().role == 'admin';
+      let u = profile();
+      return signedIn() && u.active == true && u.role == 'admin' && unlocked();
     }
     function auditPath(id) {
       return /databases/$(database)/documents/auditLog/$(id);
@@ -50,29 +59,95 @@ service cloud.firestore {
     function onlyChanges(fields) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
+    // 로그인한 사람이 남기는 audit 기록: 이름·권한·시각을 속일 수 없다
+    function ownAudit() {
+      let u = profile();
+      let d = request.resource.data;
+      return signedIn() && u.active == true && unlocked()
+        && d.uid == request.auth.uid
+        && d.email == request.auth.token.email
+        && d.name == u.name
+        && d.role == u.role
+        && d.at == request.time
+        && d.action is string;
+    }
+    // 로그인 전에 남기는 audit 기록: 로그인 실패와 계정 잠금뿐이다
+    function loginFailureAudit() {
+      let d = request.resource.data;
+      return request.auth == null
+        && d.keys().hasOnly(['uid', 'name', 'email', 'role', 'action', 'target', 'targetId', 'at', 'after'])
+        && d.uid == ''
+        && d.name == ''
+        && d.role == 'none'
+        && d.email is string && d.email.size() < 200
+        && d.action in ['로그인 실패', '계정 잠금']
+        && d.at == request.time;
+    }
 
     match /auditLog/{id} {
       allow read: if admin() || (active() && resource.data.uid == request.auth.uid);
-      allow create: if active()
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.email == request.auth.token.email
-        && request.resource.data.name == me().name
-        && request.resource.data.role == me().role
-        && request.resource.data.at == request.time
-        && request.resource.data.action is string;
+      allow create: if loginFailureAudit() || ownAudit();
       allow update, delete: if false;
+    }
+
+    // 이메일별 로그인 실패 횟수. 5회가 되면 잠기고, 관리자만 풀 수 있다
+    match /loginGuard/{email} {
+      allow get: if true;
+      allow list: if admin();
+      // 실패 1회 기록 (로그인 전이므로 누구나 쓸 수 있지만 1씩만 늘릴 수 있다)
+      allow create: if request.resource.data.keys().hasOnly(['email', 'fails', 'locked', 'updatedAt'])
+        && email.size() < 200
+        && request.resource.data.email == email
+        && request.resource.data.fails == 1
+        && request.resource.data.locked == false
+        && request.resource.data.updatedAt == request.time;
+      allow update: if
+        // 실패 1회 추가. 5회째에 잠긴다
+        (request.resource.data.keys().hasOnly(['email', 'fails', 'locked', 'updatedAt', 'auditId'])
+          && resource.data.locked != true
+          && request.resource.data.email == email
+          && request.resource.data.fails == resource.data.fails + 1
+          && request.resource.data.locked == (request.resource.data.fails >= 5)
+          && request.resource.data.updatedAt == request.time)
+        // 로그인에 성공하면 본인이 횟수를 0으로 되돌린다 (잠긴 뒤에는 불가)
+        || (signedIn()
+          && request.auth.token.email == email
+          && resource.data.locked != true
+          && request.resource.data.fails == 0
+          && request.resource.data.locked == false
+          && request.resource.data.updatedAt == request.time)
+        // 관리자가 잠금을 푼다
+        || (admin() && audited()
+          && request.resource.data.fails == 0
+          && request.resource.data.locked == false
+          && request.resource.data.updatedAt == request.time);
+      allow delete: if false;
     }
 
     match /users/{uid} {
       allow get: if signedIn() && (request.auth.uid == uid || admin());
       allow list: if admin();
-      // 관리자가 자기 권한을 스스로 없애 아무도 관리할 수 없게 되는 일을 막는다
       allow create: if selfSignup(uid);
+      // 관리자가 자기 권한을 스스로 없애 아무도 관리할 수 없게 되는 일을 막는다
       allow create, update: if admin() && audited()
         && request.resource.data.role in ['user', 'admin']
         && request.resource.data.active is bool
         && !(uid == request.auth.uid
              && (request.resource.data.role != 'admin' || request.resource.data.active != true));
+      // 초기화된 비밀번호를 본인이 바꾼 뒤 "변경 필요" 표시를 지운다
+      allow update: if signedIn() && uid == request.auth.uid
+        && onlyChanges(['mustChangePassword'])
+        && request.resource.data.mustChangePassword == false;
+      allow delete: if false;
+    }
+
+    // 로그인 키. 관리자가 비밀번호를 초기화할 때만 읽는다. 본인도 읽을 수 없다
+    match /secrets/{uid} {
+      allow get: if admin();
+      allow create, update: if signedIn() && (request.auth.uid == uid || admin())
+        && request.resource.data.keys().hasOnly(['key', 'updatedAt'])
+        && request.resource.data.key is string
+        && request.resource.data.updatedAt == request.time;
       allow delete: if false;
     }
 

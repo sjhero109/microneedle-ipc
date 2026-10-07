@@ -129,7 +129,8 @@ export interface AuditEntry {
   uid: string
   name: string
   email: string
-  role: Role
+  /** 'none' 은 로그인 전에 남은 기록(로그인 실패, 계정 잠금)이다 */
+  role: Role | 'none'
   action: string
   target: string
   targetId: string
@@ -146,7 +147,26 @@ export interface UserProfile {
   active: boolean
   /** 가입 신청 후 관리자 승인을 기다리는 중 */
   pending?: boolean
+  /** 관리자가 비밀번호를 초기화했거나 임시 비밀번호로 만든 계정: 로그인하면 먼저 비밀번호를 바꿔야 한다 */
+  mustChangePassword?: boolean
 }
+
+/** 이메일별 로그인 실패 횟수. 5회가 되면 잠기고 관리자가 풀어야 한다 */
+export interface LoginGuard {
+  /** 문서 ID = 소문자 이메일 */
+  id: string
+  email: string
+  fails: number
+  locked: boolean
+  updatedAt: number
+}
+
+export const MAX_LOGIN_FAILS = 5
+
+/** 관리자가 비밀번호를 초기화하면 이 값이 된다 */
+export const RESET_PASSWORD = 'dw1234'
+
+export const roleLabel = (role: Role | 'none') => (role === 'admin' ? '관리자' : role === 'user' ? '일반 사용자' : '로그인 전')
 
 export interface DbState {
   recipes: Recipe[]
@@ -155,6 +175,7 @@ export interface DbState {
   corrections: Correction[]
   audit: AuditEntry[]
   users: UserProfile[]
+  guards: LoginGuard[]
 }
 
 export const DEFAULT_CRITERIA: Criteria = {

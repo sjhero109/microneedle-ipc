@@ -4,7 +4,7 @@ import { exportWorkbook } from '../data/excel'
 import { dispenserView, evaluate, trayLabels, unused } from '../data/model'
 import { logEvent, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
-import { DISPENSERS, targetOf } from '../data/types'
+import { DISPENSERS, roleLabel, targetOf } from '../data/types'
 import { TrendChart } from './TrendChart'
 import { Button, Deviation, Field, Input, Modal, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
@@ -142,7 +142,7 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
             <span className="text-sub">{dateTime(a.at)}</span>
             <span className="font-medium">{a.action}</span>
             <span>
-              {a.name} ({a.role === 'admin' ? '관리자' : '일반'})
+              {a.name} ({roleLabel(a.role)})
             </span>
             {a.reason && <span className="text-sub">{a.reason}</span>}
           </li>

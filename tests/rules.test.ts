@@ -290,3 +290,87 @@ describe('앱에서 직접 가입', () => {
     await assertFails(setDoc(doc(as('user'), 'meta', 'setup'), { uid: 'user1' }))
   })
 })
+
+describe('로그인 실패와 계정 잠금', () => {
+  const anon = () => env.unauthenticatedContext().firestore() as unknown as Firestore
+  const EMAIL = PEOPLE.user.email
+  const guard = (fails: number, over: Record<string, unknown> = {}) => ({ email: EMAIL, fails, locked: fails >= 5, updatedAt: serverTimestamp(), ...over })
+  const seedGuard = (fails: number, locked = fails >= 5) =>
+    env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore() as unknown as Firestore, 'loginGuard', EMAIL), { email: EMAIL, fails, locked }))
+  const failAudit = (over: Record<string, unknown> = {}) => ({ uid: '', name: '', email: EMAIL, role: 'none', action: '로그인 실패', target: 'loginGuard', targetId: EMAIL, at: serverTimestamp(), ...over })
+
+  it('로그인 전에도 실패를 1회씩 기록할 수 있다', async () => {
+    await assertSucceeds(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(1)))
+    await assertSucceeds(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(2)))
+  })
+
+  it('실패 횟수를 건너뛰거나 줄일 수 없다', async () => {
+    await assertFails(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(3)))
+    await seedGuard(2)
+    await assertFails(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(4)))
+    await assertFails(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(1)))
+    await assertFails(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(0)))
+  })
+
+  it('5회째에 잠기고, 잠그지 않은 채로 5회를 기록할 수 없다', async () => {
+    await seedGuard(4)
+    await assertFails(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(5, { locked: false })))
+    await assertSucceeds(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(5)))
+    // 잠긴 뒤에는 더 바꿀 수 없다
+    await assertFails(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(6)))
+  })
+
+  it('잠긴 계정은 비밀번호가 맞아도 읽고 쓸 수 없다', async () => {
+    await seedGuard(5)
+    await assertFails(getDoc(doc(as('user'), 'records', 'rec1')))
+    await assertFails(withAudit('user', `records/${id('rec')}`, record('user')))
+    // 다른 사람은 영향이 없다
+    await assertSucceeds(getDoc(doc(as('other'), 'records', 'rec1')))
+  })
+
+  it('잠긴 계정은 스스로 풀 수 없고 관리자가 푼다', async () => {
+    await seedGuard(5)
+    await assertFails(setDoc(doc(as('user'), 'loginGuard', EMAIL), guard(0)))
+    await assertFails(setDoc(doc(anon(), 'loginGuard', EMAIL), guard(0)))
+    await assertSucceeds(withAudit('admin', `loginGuard/${EMAIL}`, guard(0), { merge: true }))
+    await assertSucceeds(getDoc(doc(as('user'), 'records', 'rec1')))
+  })
+
+  it('로그인에 성공하면 본인이 실패 횟수를 지운다', async () => {
+    await seedGuard(3)
+    await assertFails(setDoc(doc(as('other'), 'loginGuard', EMAIL), guard(0)))
+    await assertSucceeds(setDoc(doc(as('user'), 'loginGuard', EMAIL), guard(0)))
+  })
+
+  it('로그인 전에는 로그인 실패·계정 잠금 기록만 남길 수 있다', async () => {
+    await assertSucceeds(setDoc(doc(anon(), 'auditLog', id('audit')), failAudit()))
+    await assertSucceeds(setDoc(doc(anon(), 'auditLog', id('audit')), failAudit({ action: '계정 잠금' })))
+    await assertFails(setDoc(doc(anon(), 'auditLog', id('audit')), failAudit({ action: 'IPC 저장' })))
+    await assertFails(setDoc(doc(anon(), 'auditLog', id('audit')), failAudit({ name: '관리자' })))
+    await assertFails(setDoc(doc(anon(), 'auditLog', id('audit')), failAudit({ uid: 'admin1', role: 'admin' })))
+    await assertFails(setDoc(doc(anon(), 'auditLog', id('audit')), failAudit({ at: new Date('2020-01-01') })))
+    await assertFails(getDoc(doc(anon(), 'auditLog', 'old-audit')))
+  })
+})
+
+describe('비밀번호 초기화', () => {
+  const key = (v: string) => ({ key: v, updatedAt: serverTimestamp() })
+
+  it('로그인 키는 본인과 관리자만 쓰고, 관리자만 읽는다', async () => {
+    await assertSucceeds(setDoc(doc(as('user'), 'secrets', 'user1'), key('a')))
+    await assertFails(setDoc(doc(as('other'), 'secrets', 'user1'), key('b')))
+    await assertSucceeds(setDoc(doc(as('admin'), 'secrets', 'user1'), key('c')))
+    await assertFails(getDoc(doc(as('user'), 'secrets', 'user1')))
+    await assertFails(getDoc(doc(as('other'), 'secrets', 'user1')))
+    await assertSucceeds(getDoc(doc(as('admin'), 'secrets', 'user1')))
+    await assertFails(deleteDoc(doc(as('admin'), 'secrets', 'user1')))
+  })
+
+  it('"비밀번호 변경 필요" 표시는 관리자가 켜고 본인은 끌 수만 있다', async () => {
+    await assertSucceeds(withAudit('admin', 'users/user1', { mustChangePassword: true }, { merge: true }))
+    await assertFails(updateDoc(doc(as('other'), 'users', 'user1'), { mustChangePassword: false }))
+    await assertFails(updateDoc(doc(as('user'), 'users', 'user1'), { mustChangePassword: false, role: 'admin' }))
+    await assertSucceeds(updateDoc(doc(as('user'), 'users', 'user1'), { mustChangePassword: false }))
+    await assertFails(updateDoc(doc(as('user'), 'users', 'user1'), { mustChangePassword: true }))
+  })
+})

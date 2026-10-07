@@ -5,15 +5,20 @@ import {
   EmailAuthProvider,
   getAuth,
   reauthenticateWithCredential,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
+  updatePassword,
   type Auth,
+  type User,
 } from 'firebase/auth'
 import {
   collection,
   connectFirestoreEmulator,
   doc,
   getDoc,
+  setDoc,
+  updateDoc,
   initializeFirestore,
   onSnapshot,
   query,
@@ -26,6 +31,7 @@ import {
 import { firebaseConfig } from '../firebase.config'
 import type { Backend, Collection } from './backend'
 import type { Actor, DbState, UserProfile } from './types'
+import { MAX_LOGIN_FAILS } from './types'
 
 const EMULATOR = import.meta.env.VITE_EMULATOR === '1'
 const EMULATOR_CONFIG: FirebaseOptions = { projectId: 'demo-microneedle-ipc', apiKey: 'demo-key', authDomain: 'localhost' }
@@ -60,17 +66,62 @@ export async function loadProfile(uid: string): Promise<UserProfile | null> {
 }
 
 /**
+ * 로그인에 실제로 쓰는 키. 입력한 비밀번호를 이메일과 함께 변환한 값이며, 비밀번호 자체는 어디에도 저장하지 않는다.
+ * 이 키를 secrets 에 보관해 두기 때문에 관리자가 사용자의 비밀번호를 초기화할 수 있다
+ * (서버 프로그램 없이는 다른 사람의 비밀번호를 직접 바꿀 수 없다).
+ */
+export async function passwordKey(email: string, password: string): Promise<string> {
+  const enc = new TextEncoder()
+  const base = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(`microneedle-ipc:${email.toLowerCase()}`), iterations: 100_000 },
+    base,
+    256,
+  )
+  return [...new Uint8Array(bits)].map((x) => x.toString(16).padStart(2, '0')).join('')
+}
+
+const BAD_CREDENTIAL = ['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-login-credentials']
+const isBadCredential = (e: unknown) => BAD_CREDENTIAL.includes((e as { code?: string }).code ?? '')
+
+function saveKey(uid: string, key: string) {
+  return setDoc(doc(services().fs, 'secrets', uid), { key, updatedAt: serverTimestamp() })
+}
+
+/**
+ * 로그인한다. 키 방식 이전에 만든 계정은 입력한 비밀번호 그대로 한 번 더 시도하고,
+ * 맞으면 그 자리에서 키 방식으로 바꿔 둔다.
+ */
+export async function signIn(email: string, password: string): Promise<void> {
+  const { auth } = services()
+  const key = await passwordKey(email, password)
+  let user: User
+  try {
+    user = (await signInWithEmailAndPassword(auth, email, key)).user
+  } catch (e) {
+    if (!isBadCredential(e)) throw e
+    user = (await signInWithEmailAndPassword(auth, email, password)).user
+    await updatePassword(user, key)
+  }
+  // 초기화에 쓸 키를 항상 최신으로 맞춰 둔다. 실패해도 로그인은 계속한다
+  await saveKey(user.uid, key).catch(() => {})
+}
+
+/**
  * 앱에서 직접 가입한다. 맨 처음 가입한 사람은 관리자가 되고, 그 뒤로는 관리자 승인을 기다린다.
  * 이미 있는 계정이면 그 계정으로 로그인해서 이어 간다.
  */
 export async function signUp(name: string, email: string, password: string): Promise<void> {
   const { auth, fs } = services()
+  const key = await passwordKey(email, password)
   let uid: string
   try {
-    uid = (await createUserWithEmailAndPassword(auth, email, password)).user.uid
+    uid = (await createUserWithEmailAndPassword(auth, email, key)).user.uid
+    await saveKey(uid, key).catch(() => {})
   } catch (e) {
     if ((e as { code?: string }).code !== 'auth/email-already-in-use') throw e
-    uid = (await signInWithEmailAndPassword(auth, email, password)).user.uid
+    await signIn(email, password)
+    uid = auth.currentUser!.uid
   }
   if (await loadProfile(uid)) return
   const first = !(await getDoc(doc(fs, 'meta', 'setup'))).exists()
@@ -88,29 +139,112 @@ export async function signUp(name: string, email: string, password: string): Pro
   await batch.commit()
 }
 
+export interface LockState {
+  fails: number
+  locked: boolean
+}
+
+/** 이메일의 로그인 실패 횟수와 잠금 여부 */
+export async function loginLock(email: string): Promise<LockState> {
+  const snap = await getDoc(doc(services().fs, 'loginGuard', email))
+  const d = snap.data()
+  return { fails: Number(d?.fails ?? 0), locked: d?.locked === true }
+}
+
+/**
+ * 로그인 실패를 1회 기록한다. 정해진 횟수가 되면 계정이 잠긴다.
+ * 로그인 전이라 이름을 알 수 없으므로 audit 기록에는 이메일만 남는다.
+ */
+export async function recordLoginFailure(email: string): Promise<LockState> {
+  const { fs } = services()
+  const cur = await loginLock(email)
+  if (cur.locked) return cur
+  const next: LockState = { fails: cur.fails + 1, locked: cur.fails + 1 >= MAX_LOGIN_FAILS }
+  const batch = writeBatch(fs)
+  batch.set(doc(fs, 'loginGuard', email), { email, ...next, updatedAt: serverTimestamp() })
+  const entry = { uid: '', name: '', email, role: 'none', target: 'loginGuard', targetId: email, at: serverTimestamp() }
+  batch.set(doc(collection(fs, 'auditLog')), { ...entry, action: '로그인 실패', after: { fails: next.fails } })
+  if (next.locked) batch.set(doc(collection(fs, 'auditLog')), { ...entry, action: '계정 잠금', after: { fails: next.fails } })
+  await batch.commit()
+  return next
+}
+
+/** 로그인에 성공하면 실패 횟수를 0으로 되돌린다 */
+export async function clearLoginFailures(email: string) {
+  const { fs } = services()
+  await setDoc(doc(fs, 'loginGuard', email), { email, fails: 0, locked: false, updatedAt: serverTimestamp() })
+}
+
+/** 사용자가 스스로 새 비밀번호를 정할 수 있는 메일을 보낸다 */
+export function sendPasswordReset(email: string) {
+  return sendPasswordResetEmail(services().auth, email)
+}
+
 /** 중요 작업 전에 비밀번호를 다시 확인한다 (전자서명 역할) */
 export async function verifyPassword(password: string) {
   const user = services().auth.currentUser
   if (!user?.email) throw new Error('로그인 상태가 아닙니다.')
-  await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password))
+  try {
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, await passwordKey(user.email, password)))
+  } catch (e) {
+    if (!isBadCredential(e)) throw e
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password))
+  }
 }
 
-/**
- * 관리자가 새 계정을 만든다. 현재 로그인을 유지하려고 별도 앱 인스턴스에서 만든 뒤 바로 닫는다.
- * 계정만으로는 아무 권한이 없고, users 문서가 있어야 접근할 수 있다.
- */
-export async function createAccount(email: string, password: string): Promise<string> {
+/** 본인 비밀번호를 바꾼다 */
+export async function changeOwnPassword(current: string, next: string) {
+  const { auth, fs } = services()
+  const user = auth.currentUser
+  if (!user?.email) throw new Error('로그인 상태가 아닙니다.')
+  await verifyPassword(current)
+  const key = await passwordKey(user.email, next)
+  await updatePassword(user, key)
+  await saveKey(user.uid, key)
+  await updateDoc(doc(fs, 'users', user.uid), { mustChangePassword: false })
+}
+
+/** 별도 앱 인스턴스: 현재 로그인을 건드리지 않고 다른 계정을 다룬다 */
+async function withSecondAuth<T>(fn: (a: Auth) => Promise<T>): Promise<T> {
   if (!config) throw new Error('Firebase 설정이 없습니다.')
-  const second = initializeApp(config, `signup-${Date.now()}`)
+  const second = initializeApp(config, `second-${Date.now()}`)
   try {
     const a = getAuth(second)
     if (EMULATOR) connectAuthEmulator(a, 'http://127.0.0.1:9099', { disableWarnings: true })
-    const cred = await createUserWithEmailAndPassword(a, email, password)
+    const result = await fn(a)
     await signOut(a)
-    return cred.user.uid
+    return result
   } finally {
     await deleteApp(second)
   }
+}
+
+/**
+ * 관리자가 새 계정을 만든다. 계정만으로는 아무 권한이 없고, users 문서가 있어야 접근할 수 있다.
+ */
+export async function createAccount(email: string, password: string): Promise<string> {
+  const key = await passwordKey(email, password)
+  const uid = await withSecondAuth(async (a) => (await createUserWithEmailAndPassword(a, email, key)).user.uid)
+  await saveKey(uid, key)
+  return uid
+}
+
+/**
+ * 관리자가 사용자의 비밀번호를 정해진 값으로 초기화한다.
+ * 보관해 둔 키로 그 계정에 잠시 들어가 비밀번호를 바꾸는 방식이다.
+ */
+export async function adminResetPassword(target: { uid: string; email: string }, newPassword: string) {
+  const snap = await getDoc(doc(services().fs, 'secrets', target.uid))
+  const oldKey = snap.data()?.key as string | undefined
+  if (!oldKey) throw new Error('이 계정은 새 로그인 방식으로 한 번도 로그인하지 않아 초기화할 수 없습니다. 재설정 메일을 보내세요.')
+  const newKey = await passwordKey(target.email, newPassword)
+  try {
+    await withSecondAuth(async (a) => updatePassword((await signInWithEmailAndPassword(a, target.email, oldKey)).user, newKey))
+  } catch (e) {
+    if (isBadCredential(e)) throw new Error('보관된 로그인 키가 현재 비밀번호와 맞지 않아 초기화할 수 없습니다. 재설정 메일을 보내세요.')
+    throw e
+  }
+  await saveKey(target.uid, newKey)
 }
 
 const COLLECTIONS: Record<keyof DbState, string> = {
@@ -120,6 +254,7 @@ const COLLECTIONS: Record<keyof DbState, string> = {
   corrections: 'corrections',
   audit: 'auditLog',
   users: 'users',
+  guards: 'loginGuard',
 }
 
 /** 시각은 브라우저 시계가 아니라 서버 시각으로 남긴다 */
@@ -135,12 +270,12 @@ export function firebaseBackend(actor: Actor): Backend {
   const { fs } = services()
   return {
     subscribe(cb) {
-      let state: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [] }
+      let state: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [] }
       // 모든 컬렉션의 첫 응답이 온 뒤에 화면에 넘긴다
       const waiting = new Set<keyof DbState>()
       const stops = (Object.keys(COLLECTIONS) as (keyof DbState)[]).map((key) => {
         // 일반 사용자는 사용자 목록을 볼 수 없고, audit 은 본인 것만 볼 수 있다
-        if (key === 'users' && actor.role !== 'admin') return () => {}
+        if ((key === 'users' || key === 'guards') && actor.role !== 'admin') return () => {}
         waiting.add(key)
         const col = collection(fs, COLLECTIONS[key])
         const q = key === 'audit' && actor.role !== 'admin' ? query(col, where('uid', '==', actor.uid)) : col

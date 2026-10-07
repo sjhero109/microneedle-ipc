@@ -1,12 +1,26 @@
-import { browserSessionPersistence, onAuthStateChanged, setPersistence, signInWithEmailAndPassword, signOut, type User } from 'firebase/auth'
+import { browserSessionPersistence, onAuthStateChanged, setPersistence, signOut, type User } from 'firebase/auth'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button, Field, Input, Modal } from '../ui/common'
-import { firebaseBackend, firebaseEnabled, loadProfile, services, signUp as createOwnAccount, verifyPassword } from './firebase'
+import {
+  changeOwnPassword,
+  clearLoginFailures,
+  firebaseBackend,
+  firebaseEnabled,
+  loadProfile,
+  loginLock,
+  recordLoginFailure,
+  services,
+  signIn as signInAccount,
+  signUp as createOwnAccount,
+  verifyPassword,
+} from './firebase'
 import { clearBackend, logEvent, setBackend } from './store'
 import type { Actor, Role } from './types'
+import { MAX_LOGIN_FAILS } from './types'
 
 /** 이 시간 동안 입력이 없으면 자동으로 로그아웃한다 */
 const IDLE_MS = 15 * 60 * 1000
+const LOCKED_MESSAGE = `로그인 ${MAX_LOGIN_FAILS}회 실패로 계정이 잠겼습니다. 관리자에게 잠금 해제를 요청하세요.`
 /** 로그아웃 기록이 저장되기를 기다리는 최대 시간 */
 const LOGOUT_WAIT_MS = 3000
 
@@ -22,6 +36,9 @@ interface AuthState {
   signUp(name: string, email: string, password: string): Promise<void>
   /** 오류가 아닌 안내 문구 (가입 신청 접수 등) */
   notice: string
+  /** 초기화된 비밀번호로 들어온 경우: 새 비밀번호를 정하기 전에는 쓸 수 없다 */
+  mustChange: boolean
+  changePassword(current: string, next: string): Promise<void>
   logout(): Promise<void>
   /** 중요 작업 전에 비밀번호를 다시 확인한다. 취소하거나 틀리면 예외를 던진다 */
   confirm(): Promise<void>
@@ -78,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const explicit = useRef(false)
 
   const [notice, setNotice] = useState('')
+  const [mustChange, setMustChange] = useState(false)
   // 가입 처리 중에는 users 문서가 아직 없으므로 로그인 상태 변화를 잠시 무시한다
   const signingUp = useRef(false)
 
@@ -91,8 +109,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         else setError('사용 권한이 없는 계정입니다. 관리자에게 문의하세요.')
         return
       }
+      // 잠긴 계정은 비밀번호가 맞아도 들어올 수 없다. 잠기지 않았으면 실패 횟수를 지운다
+      const email = (user.email ?? profile.email).toLowerCase()
+      const lock = await loginLock(email)
+      if (lock.locked) {
+        await signOut(auth)
+        setError(LOCKED_MESSAGE)
+        return
+      }
+      if (lock.fails > 0) void clearLoginFailures(email).catch(() => {})
       const a: Actor = { uid: user.uid, name: profile.name, email: user.email ?? profile.email, role: profile.role }
       setBackend(firebaseBackend(a))
+      setMustChange(profile.mustChangePassword === true)
       setActor(a)
       if (explicit.current) void logEvent(a, '로그인')
       explicit.current = false
@@ -133,14 +161,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError('')
     setNotice('')
     const { auth } = services()
+    const key = email.toLowerCase()
+    try {
+      if ((await loginLock(key)).locked) {
+        setError(LOCKED_MESSAGE)
+        return
+      }
+    } catch {
+      // 잠금 여부를 읽지 못해도 로그인은 시도한다. 잠긴 계정은 규칙이 막는다
+    }
     try {
       // 탭을 닫으면 로그인이 풀리게 한다 (공용 PC)
       await setPersistence(auth, browserSessionPersistence)
       explicit.current = true
-      await signInWithEmailAndPassword(auth, email, password)
-    } catch {
+      await signInAccount(email, password)
+    } catch (e) {
       explicit.current = false
-      setError('이메일 또는 비밀번호가 맞지 않습니다.')
+      const code = (e as { code?: string }).code ?? ''
+      if (code === 'auth/too-many-requests') {
+        setError('로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.')
+        return
+      }
+      if (code === 'auth/network-request-failed') {
+        setError('네트워크에 연결할 수 없습니다.')
+        return
+      }
+      try {
+        const lock = await recordLoginFailure(key)
+        setError(lock.locked ? LOCKED_MESSAGE : `이메일 또는 비밀번호가 맞지 않습니다. (${lock.fails}/${MAX_LOGIN_FAILS}회 실패 – ${MAX_LOGIN_FAILS}회가 되면 계정이 잠깁니다)`)
+      } catch {
+        setError('이메일 또는 비밀번호가 맞지 않습니다.')
+      }
     }
   }, [])
 
@@ -173,6 +224,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     },
     [enter],
+  )
+
+  const changePassword = useCallback(
+    async (current: string, next: string) => {
+      await changeOwnPassword(current, next)
+      setMustChange(false)
+      if (actor) void logEvent(actor, '비밀번호 변경')
+    },
+    [actor],
   )
 
   const leave = useCallback(
@@ -229,8 +289,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<AuthState>(
-    () => ({ mode: firebaseEnabled ? 'firebase' : 'demo', actor, ready, error, notice, loginDemo, signIn, signUp, logout: () => leave('로그아웃'), confirm }),
-    [actor, ready, error, notice, loginDemo, signIn, signUp, leave, confirm],
+    () => ({ mode: firebaseEnabled ? 'firebase' : 'demo', actor, ready, error, notice, mustChange, changePassword, loginDemo, signIn, signUp, logout: () => leave('로그아웃'), confirm }),
+    [actor, ready, error, notice, mustChange, changePassword, loginDemo, signIn, signUp, leave, confirm],
   )
   return (
     <Ctx.Provider value={value}>

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useActor, useAuth } from '../data/auth'
-import { createAccount, firebaseEnabled } from '../data/firebase'
+import { adminResetPassword, createAccount, firebaseEnabled, sendPasswordReset } from '../data/firebase'
 import { exportWorkbook, parseImport, type ParsedSheet } from '../data/excel'
-import { importRecords, logEvent, reviewCorrection, saveRecipe, saveUser, setExcluded, startBatch, useDb, type RecipeInput } from '../data/store'
+import { importRecords, logEvent, logAdminAction, markPasswordReset, reviewCorrection, saveRecipe, saveUser, setExcluded, startBatch, unlockAccount, useDb, type RecipeInput } from '../data/store'
 import type { Recipe, Role, UserProfile } from '../data/types'
-import { DEFAULT_CRITERIA } from '../data/types'
+import { DEFAULT_CRITERIA, RESET_PASSWORD, roleLabel } from '../data/types'
 import { Button, Deviation, Field, Input, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
 type Section = 'recipes' | 'import' | 'review' | 'audit' | 'users'
@@ -440,8 +440,8 @@ function Audit() {
             {rows.slice(0, 200).map((a) => (
               <tr key={a.id} className="border-b border-line/60">
                 <td className="py-1.5 pr-3 whitespace-nowrap">{dateTime(a.at)}</td>
-                <td className="py-1.5 pr-3">{a.name}</td>
-                <td className="py-1.5 pr-3">{a.role === 'admin' ? '관리자' : '일반'}</td>
+                <td className="py-1.5 pr-3">{a.name || a.email}</td>
+                <td className="py-1.5 pr-3">{roleLabel(a.role)}</td>
                 <td className="py-1.5 pr-3">{a.action}</td>
                 <td className="py-1.5 pr-3 text-xs text-sub">{a.target}</td>
                 <td className="py-1.5 pr-3">{a.reason}</td>
@@ -483,15 +483,51 @@ function Users() {
   return (
     <div className="flex flex-col gap-4">
       <ul className="flex flex-col gap-2">
-        {db.users.map((u) => (
+        {db.users.map((u) => {
+          const guard = db.guards.find((g) => g.id === u.email.toLowerCase())
+          return (
           <li key={u.uid} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2.5">
             <div className="min-w-0">
               <div className="font-semibold">
                 {u.name} {!u.active && <span className="text-xs font-normal text-sub">({u.pending ? '승인 대기' : '사용 중지'})</span>}
+                {guard?.locked && <span className="ml-1 rounded bg-bad px-1.5 py-0.5 text-xs font-medium text-white">잠김 – 로그인 {guard.fails}회 실패</span>}
               </div>
-              <div className="truncate text-sm text-sub">{u.email}</div>
+              <div className="truncate text-sm text-sub">
+                {u.email}
+                {guard && !guard.locked && guard.fails > 0 && <span className="num ml-2">로그인 실패 {guard.fails}회</span>}
+              </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {guard?.locked && (
+                <Button variant="primary" className="h-10 px-3 text-sm" onClick={() => run(() => unlockAccount(actor, guard.id))}>
+                  잠금 해제
+                </Button>
+              )}
+              <Button
+                className="h-10 px-3 text-sm"
+                disabled={u.uid === actor.uid}
+                onClick={() =>
+                  run(async () => {
+                    await adminResetPassword(u, RESET_PASSWORD)
+                    await markPasswordReset(actor, u)
+                    setMsg(`${u.name} 님의 비밀번호를 ${RESET_PASSWORD} 로 초기화했습니다. 다음 로그인 때 새 비밀번호를 정하게 됩니다.`)
+                  })
+                }
+              >
+                비밀번호 초기화
+              </Button>
+              <Button
+                className="h-10 px-3 text-sm"
+                onClick={() =>
+                  run(async () => {
+                    await sendPasswordReset(u.email)
+                    await logAdminAction(actor, '비밀번호 재설정 메일 발송', 'users', u.uid, { email: u.email })
+                    setMsg(`${u.name} 님에게 비밀번호 재설정 메일을 보냈습니다.`)
+                  })
+                }
+              >
+                재설정 메일
+              </Button>
               <Select className="!h-10 !w-auto" value={u.role} disabled={u.uid === actor.uid} onChange={(e) => change(u, { role: e.target.value as Role })}>
                 <option value="user">일반 사용자</option>
                 <option value="admin">관리자</option>
@@ -501,7 +537,8 @@ function Users() {
               </Button>
             </div>
           </li>
-        ))}
+          )
+        })}
       </ul>
 
       <div>
@@ -530,7 +567,7 @@ function Users() {
           onClick={() =>
             run(async () => {
               const uid = await createAccount(email.trim(), password)
-              await saveUser(actor, { uid, name: name.trim(), email: email.trim(), role, active: true })
+              await saveUser(actor, { uid, name: name.trim(), email: email.trim(), role, active: true, mustChangePassword: true })
               setMsg(name.trim() + " 계정을 만들었습니다.")
               setName('')
               setEmail('')
