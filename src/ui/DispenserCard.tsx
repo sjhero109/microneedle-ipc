@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useActor } from '../data/auth'
-import { dispenserView, evaluate, unused } from '../data/model'
+import { dispenserView, evaluate, trayLabels, unused } from '../data/model'
 import { addRecord, useDb } from '../data/store'
 import type { Batch, DispenserId, MaterialType } from '../data/types'
 import { materialOf } from '../data/types'
@@ -26,6 +26,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const actor = useActor()
   const saved = useMemo(() => dispenserView(db, batch, dispenser.id), [db, batch, dispenser.id])
   const last = saved.records.at(-1)
+  const labels = useMemo(() => trayLabels(saved.records), [saved.records])
   const passedOnce = saved.records.some((r) => r.pass && !unused(r))
 
   const [tray, setTray] = useState(() => (last ? String(last.tray) : '1'))
@@ -56,6 +57,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
       return {
         seq: r.seq,
         tray: r.tray,
+        label: labels.get(r.id),
         pulse: r.pulse,
         pct: (r.weight / saved.target) * 100,
         levelPct: s ? (s.levelAtPulse / saved.target) * 100 : null,
@@ -239,6 +241,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                   <th className="py-1 text-right font-medium">중량</th>
                   <th className="py-1 text-right font-medium">편차</th>
                   <th className="py-1 text-right font-medium">판정</th>
+                  <th className="py-1 pl-2 text-right font-medium">저장</th>
                 </tr>
               </thead>
               <tbody>
@@ -246,7 +249,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                   <tr key={r.id} className={`border-b border-line/60 ${r.excluded ? 'text-sub line-through' : r.test ? 'text-sub' : ''}`}>
                     <td className="py-1.5">{r.seq}</td>
                     <td className="py-1.5">
-                      {r.tray}
+                      {labels.get(r.id) ?? r.tray}
                       {r.phase === 'startup' && <span className="ml-1 text-xs text-sub">개시 전</span>}
                       {r.test && <span className="ml-1 rounded bg-sunken px-1 text-xs">테스트</span>}
                     </td>
@@ -256,6 +259,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                       <Deviation devPct={r.devPct} band={r.band} />
                     </td>
                     <td className="py-1.5 text-right">{r.pass ? '적합' : '부적합'}</td>
+                    <td className="max-w-20 truncate py-1.5 pl-2 text-right text-xs text-sub">{r.createdByName}</td>
                   </tr>
                 ))}
               </tbody>

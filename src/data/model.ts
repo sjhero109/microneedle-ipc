@@ -23,8 +23,25 @@ export function toPoint(r: Pick<IpcRecord, 'tray' | 'pulse' | 'weight' | 'shots'
   return { tray: r.tray, pulse: r.pulse, weight: r.weight, shots: r.shots, phase: r.phase, excluded: unused(r) }
 }
 
+/**
+ * 같은 배치·토출기·트레이에서 IPC를 반복한 순서를 붙인 표시값.
+ * 트레이 1에서 세 번 했다면 1-1, 1-2, 1-3 이 된다.
+ */
+export function trayLabels(records: IpcRecord[]): Map<string, string> {
+  const counts = new Map<string, number>()
+  const labels = new Map<string, string>()
+  const ordered = [...records].sort((a, b) => a.seq - b.seq || a.createdAt - b.createdAt)
+  for (const r of ordered) {
+    const key = `${r.batchId}|${r.dispenserId}|${r.tray}`
+    const n = (counts.get(key) ?? 0) + 1
+    counts.set(key, n)
+    labels.set(r.id, `${r.tray}-${n}`)
+  }
+  return labels
+}
+
 export function batchRecords(db: DbState, batchId: string, dispenserId: DispenserId): IpcRecord[] {
-  return db.records.filter((r) => r.batchId === batchId && r.dispenserId === dispenserId).sort((a, b) => a.seq - b.seq)
+  return db.records.filter((r) => r.batchId === batchId && r.dispenserId === dispenserId).sort((a, b) => a.seq - b.seq || a.createdAt - b.createdAt)
 }
 
 function groupByBatch(records: IpcRecord[]): IpcPoint[][] {

@@ -23,6 +23,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const [editing, setEditing] = useState(false)
   const [error, setError] = useState('')
 
+  const recent = [...db.batches].sort((a, b) => b.createdAt - a.createdAt).slice(0, 6)
   const names = (key: 'drugName' | 'baseName') => [...new Set(db.batches.map((b) => b[key]).filter(Boolean))]
 
   if (batch && !editing) {
@@ -170,6 +171,17 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
         </p>
       )}
       {error && <p className="text-sm text-bad">{error}</p>}
+      {!batch && recent.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-sub">최근 배치</span>
+          {recent.map((b) => (
+            <button key={b.id} type="button" onClick={() => onSelect(b.id)} className="num h-9 rounded-lg border border-line px-3 text-sm hover:bg-sunken">
+              {b.batchNo}
+              <span className="ml-1.5 text-xs text-sub">{b.mfgDate || b.productName}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

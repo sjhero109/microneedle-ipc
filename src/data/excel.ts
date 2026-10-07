@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx'
+import { trayLabels } from './model'
 import type { ImportRow } from './store'
 import type { AuditEntry, Batch, Correction, DispenserId, IpcRecord } from './types'
 
@@ -15,6 +16,7 @@ export function exportWorkbook(
   audit: AuditEntry[],
 ) {
   const wb = XLSX.utils.book_new()
+  const labels = trayLabels(records)
   const recRows = records.map((r) => ({
     제품명: r.productName,
     배치번호: r.batchNo,
@@ -22,6 +24,7 @@ export function exportWorkbook(
     물질명: r.materialName,
     순번: r.seq,
     트레이번호: r.tray,
+    '트레이-회차': labels.get(r.id) ?? '',
     구분: PHASE[r.phase],
     Pulse: r.pulse,
     'IPC 배수': r.shots,

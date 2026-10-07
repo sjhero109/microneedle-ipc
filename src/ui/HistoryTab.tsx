@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useActor, useAuth } from '../data/auth'
 import { exportWorkbook } from '../data/excel'
+import { trayLabels } from '../data/model'
 import { logEvent, requestCorrection, setExcluded, useDb } from '../data/store'
-import type { Correction, IpcRecord } from '../data/types'
+import type { Batch, Correction, IpcRecord } from '../data/types'
 import { DISPENSERS } from '../data/types'
 import { Button, Deviation, Field, Input, Modal, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
-const PAGE = 50
 const FIELD_LABEL: Record<Correction['field'], string> = { tray: '트레이번호', pulse: 'Pulse', totalWeight: '합산 중량' }
 const STATUS = { pending: '승인 대기', approved: '승인', rejected: '반려' } as const
 
@@ -151,115 +151,80 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
   )
 }
 
-export function HistoryTab() {
+const ymd = (t: number) => new Date(t).toLocaleDateString('sv-SE')
+
+/** 배치 한 건의 기록 목록 */
+function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): void; onOpenBatch(id: string): void }) {
   const db = useDb()
   const actor = useActor()
-  const [product, setProduct] = useState('')
-  const [batchNo, setBatchNo] = useState('')
-  const [material, setMaterial] = useState('')
   const [dispenser, setDispenser] = useState('')
-  const [author, setAuthor] = useState('')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [page, setPage] = useState(0)
   const [openId, setOpenId] = useState<string | null>(null)
 
-  const batches = useMemo(() => new Map(db.batches.map((b) => [b.id, b])), [db.batches])
-  const products = [...new Set(db.records.map((r) => r.productName))]
-
-  const rows = useMemo(() => {
-    const f = from ? new Date(`${from}T00:00:00`).getTime() : -Infinity
-    const t = to ? new Date(`${to}T23:59:59`).getTime() : Infinity
-    const q = (s: string, v: string) => !v.trim() || s.toLowerCase().includes(v.trim().toLowerCase())
-    return db.records
-      .filter((r) => {
-        const b = batches.get(r.batchId)
-        return (
-          (!product || r.productName === product) &&
-          q(r.batchNo, batchNo) &&
-          q(`${b?.drugName ?? ''} ${b?.baseName ?? ''} ${r.materialName}`, material) &&
-          (!dispenser || r.dispenserId === dispenser) &&
-          q(r.createdByName, author) &&
-          r.createdAt >= f &&
-          r.createdAt <= t
-        )
-      })
-      .sort((a, b) => b.createdAt - a.createdAt || a.dispenserId.localeCompare(b.dispenserId) || b.seq - a.seq)
-  }, [db.records, batches, product, batchNo, material, dispenser, author, from, to])
-
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE))
-  const cur = Math.min(page, pages - 1)
-  const shown = rows.slice(cur * PAGE, (cur + 1) * PAGE)
+  const all = useMemo(
+    () => db.records.filter((r) => r.batchId === batch.id).sort((a, b) => a.dispenserId.localeCompare(b.dispenserId) || a.seq - b.seq),
+    [db.records, batch.id],
+  )
+  const rows = dispenser ? all.filter((r) => r.dispenserId === dispenser) : all
+  const labels = useMemo(() => trayLabels(all), [all])
   const open = openId ? db.records.find((r) => r.id === openId) : undefined
 
   function download() {
-    const ymd = new Date().toLocaleDateString('sv-SE').replaceAll('-', '')
-    const name = `IPC_${product || '전체'}_${batchNo.trim() || '전체'}_${ymd}.xlsx`
-    const ids = new Set(rows.map((r) => r.id))
-    const bids = new Set(rows.map((r) => r.batchId))
-    const trail = db.audit.filter((a) => (ids.has(a.targetId) || bids.has(a.targetId)) && (actor.role === 'admin' || a.uid === actor.uid))
-    exportWorkbook(name, rows, db.batches, db.corrections, trail)
-    void logEvent(actor, '엑셀 내보내기', { file: name, count: rows.length })
+    const name = `IPC_${batch.productName}_${batch.batchNo}_${ymd(Date.now()).replaceAll('-', '')}.xlsx`
+    const ids = new Set(all.map((r) => r.id))
+    const trail = db.audit.filter((a) => (ids.has(a.targetId) || a.targetId === batch.id) && (actor.role === 'admin' || a.uid === actor.uid))
+    exportWorkbook(name, all, db.batches, db.corrections, trail)
+    void logEvent(actor, '엑셀 내보내기', { file: name, count: all.length })
   }
 
-  const reset = () => setPage(0)
+  const info: [string, string][] = [
+    ['제품명', batch.productName],
+    ['배치번호', batch.batchNo],
+    ['제조일자', batch.mfgDate || '–'],
+    ['약액부명', batch.drugName || '–'],
+    ['기저부명', batch.baseName || '–'],
+    ['약액부 IPC 배수', `${batch.shots}회`],
+  ]
 
   return (
     <div className="flex flex-col gap-3">
-      <Panel className="p-3">
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8 xl:items-end">
-          <Field label="제품명">
-            <Select value={product} onChange={(e) => (setProduct(e.target.value), reset())}>
-              <option value="">전체</option>
-              {products.map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="배치번호">
-            <Input value={batchNo} onChange={(e) => (setBatchNo(e.target.value), reset())} />
-          </Field>
-          <Field label="약액부명·기저부명">
-            <Input value={material} onChange={(e) => (setMaterial(e.target.value), reset())} />
-          </Field>
-          <Field label="토출기">
-            <Select value={dispenser} onChange={(e) => (setDispenser(e.target.value), reset())}>
-              <option value="">전체</option>
-              {DISPENSERS.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="작성자">
-            <Input value={author} onChange={(e) => (setAuthor(e.target.value), reset())} />
-          </Field>
-          <Field label="시작일">
-            <Input type="date" value={from} onChange={(e) => (setFrom(e.target.value), reset())} />
-          </Field>
-          <Field label="종료일">
-            <Input type="date" value={to} onChange={(e) => (setTo(e.target.value), reset())} />
-          </Field>
-          <Button variant="primary" onClick={download} disabled={rows.length === 0}>
-            엑셀 내보내기
+      <Panel className="p-3 sm:p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <Button onClick={onBack} className="h-10 px-3 text-sm">
+            ← 배치 목록
           </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => onOpenBatch(batch.id)} className="h-10 px-3 text-sm">
+              계산 탭에서 열기
+            </Button>
+            <Button variant="primary" onClick={download} disabled={all.length === 0} className="h-10 px-3 text-sm">
+              엑셀 내보내기
+            </Button>
+          </div>
         </div>
+        <dl className="grid grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-3 xl:grid-cols-6">
+          {info.map(([k, v]) => (
+            <div key={k} className="min-w-0">
+              <dt className="text-xs text-sub">{k}</dt>
+              <dd className="num font-semibold break-words">{v}</dd>
+            </div>
+          ))}
+        </dl>
       </Panel>
 
-      <div className="num flex items-center justify-between text-sm text-sub">
-        <span>{rows.length}건</span>
-        {pages > 1 && (
-          <span className="flex items-center gap-2">
-            <Button className="h-9 px-3" disabled={cur === 0} onClick={() => setPage(cur - 1)}>
-              이전
-            </Button>
-            {cur + 1} / {pages}
-            <Button className="h-9 px-3" disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)}>
-              다음
-            </Button>
-          </span>
-        )}
+      <div className="flex gap-1 overflow-x-auto">
+        {[{ id: '', label: '전체' }, ...DISPENSERS].map((d) => {
+          const n = d.id ? all.filter((r) => r.dispenserId === d.id).length : all.length
+          return (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => setDispenser(d.id)}
+              className={`num h-10 rounded-lg px-3 text-sm font-medium whitespace-nowrap ${dispenser === d.id ? 'bg-ink text-panel' : 'text-sub hover:bg-panel'}`}
+            >
+              {d.id || d.label} {n}
+            </button>
+          )
+        })}
       </div>
 
       {/* PC: 표 */}
@@ -267,7 +232,7 @@ export function HistoryTab() {
         <table className="num w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs text-sub">
-              {['작성시각', '제품명', '배치번호', '토출기', '물질명', '트레이', '구분', 'Pulse', '합산 중량', '편차', '판정', '추천 Pulse', '작성자'].map((h) => (
+              {['토출기', '#', '트레이-회차', '구분', 'Pulse', '합산 중량', '1회 중량', '편차', '판정', '추천 Pulse', '작성자', '작성시각'].map((h) => (
                 <th key={h} className="px-3 py-2 font-medium whitespace-nowrap">
                   {h}
                 </th>
@@ -275,26 +240,25 @@ export function HistoryTab() {
             </tr>
           </thead>
           <tbody>
-            {shown.map((r) => (
-              <tr key={r.id} onClick={() => setOpenId(r.id)} className={`cursor-pointer border-b border-line/60 hover:bg-sunken ${r.excluded ? 'text-sub line-through' : ''}`}>
-                <td className="px-3 py-2 whitespace-nowrap">{dateTime(r.createdAt)}</td>
-                <td className="px-3 py-2">{r.productName}</td>
-                <td className="px-3 py-2">{r.batchNo}</td>
+            {rows.map((r) => (
+              <tr key={r.id} onClick={() => setOpenId(r.id)} className={`cursor-pointer border-b border-line/60 hover:bg-sunken ${r.excluded ? 'text-sub line-through' : r.test ? 'text-sub' : ''}`}>
                 <td className="px-3 py-2">{r.dispenserId}</td>
-                <td className="px-3 py-2">{r.materialName}</td>
-                <td className="px-3 py-2">{r.tray}</td>
+                <td className="px-3 py-2">{r.seq}</td>
+                <td className="px-3 py-2">{labels.get(r.id) ?? r.tray}</td>
                 <td className="px-3 py-2 whitespace-nowrap">
                   {r.phase === 'startup' ? '개시 전' : '공정 중'}
-                  {r.test && <span className="ml-1 rounded bg-sunken px-1 text-xs text-sub">테스트</span>}
+                  {r.test && <span className="ml-1 rounded bg-sunken px-1 text-xs">테스트</span>}
                 </td>
                 <td className="px-3 py-2">{r.pulse}</td>
                 <td className="px-3 py-2">{fmt(r.totalWeight, 2)}</td>
+                <td className="px-3 py-2">{fmt(r.weight, 3)}</td>
                 <td className="px-3 py-2">
                   <Deviation devPct={r.devPct} band={r.band} />
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap">{r.pass ? '적합' : '부적합'}</td>
                 <td className="px-3 py-2">{r.recommendedPulse ?? '–'}</td>
                 <td className="px-3 py-2 whitespace-nowrap">{r.createdByName}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{dateTime(r.createdAt)}</td>
               </tr>
             ))}
           </tbody>
@@ -303,32 +267,168 @@ export function HistoryTab() {
 
       {/* 모바일: 카드 */}
       <ul className="flex flex-col gap-2 md:hidden">
-        {shown.map((r) => (
+        {rows.map((r) => (
           <li key={r.id}>
-            <button type="button" onClick={() => setOpenId(r.id)} className={`num w-full rounded-xl border border-line bg-panel px-3 py-2.5 text-left ${r.excluded ? 'text-sub line-through' : ''}`}>
+            <button type="button" onClick={() => setOpenId(r.id)} className={`num w-full rounded-xl border border-line bg-panel px-3 py-2.5 text-left ${r.excluded ? 'text-sub line-through' : r.test ? 'text-sub' : ''}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold">
-                  {r.dispenserId} · 트레이 {r.tray}
+                  {r.dispenserId} · 트레이 {labels.get(r.id) ?? r.tray}
                   {r.phase === 'startup' && <span className="ml-1 text-xs font-normal text-sub">개시 전</span>}
                   {r.test && <span className="ml-1 text-xs font-normal text-sub">테스트</span>}
                 </span>
                 <Deviation devPct={r.devPct} band={r.band} />
               </div>
-              <div className="mt-0.5 flex items-center justify-between gap-2 text-sm">
-                <span>
-                  Pulse {r.pulse} · {fmt(r.totalWeight, 2)} mg · {r.pass ? '적합' : '부적합'}
-                </span>
+              <div className="mt-0.5 text-sm">
+                Pulse {r.pulse} · {fmt(r.totalWeight, 2)} mg · {r.pass ? '적합' : '부적합'}
               </div>
               <div className="mt-0.5 truncate text-xs text-sub">
-                {r.productName} / {r.batchNo} · {r.createdByName} · {dateTime(r.createdAt)}
+                {r.createdByName} · {dateTime(r.createdAt)}
               </div>
             </button>
           </li>
         ))}
       </ul>
 
-      {rows.length === 0 && <p className="py-8 text-center text-sub">조건에 맞는 기록이 없습니다.</p>}
+      {rows.length === 0 && <p className="py-8 text-center text-sub">기록이 없습니다.</p>}
       {open && <Detail record={open} onClose={() => setOpenId(null)} />}
+    </div>
+  )
+}
+
+/** 배치 목록에서 고른 뒤 그 배치의 기록을 본다 */
+export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
+  const db = useDb()
+  const actor = useActor()
+  const [product, setProduct] = useState('')
+  const [query, setQuery] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [selected, setSelected] = useState<string | null>(null)
+
+  const list = useMemo(() => {
+    const byBatch = new Map<string, IpcRecord[]>()
+    for (const r of db.records) byBatch.set(r.batchId, [...(byBatch.get(r.batchId) ?? []), r])
+    const q = query.trim().toLowerCase()
+    return db.batches
+      .map((b) => {
+        const recs = byBatch.get(b.id) ?? []
+        const counted = recs.filter((r) => !r.excluded && !r.test)
+        return {
+          batch: b,
+          // 제조일자를 입력하지 않은 배치는 만든 날짜로 찾는다
+          date: b.mfgDate || ymd(b.createdAt),
+          count: recs.length,
+          fails: counted.filter((r) => !r.pass).length,
+          tests: recs.filter((r) => r.test).length,
+          last: recs.reduce((m, r) => Math.max(m, r.createdAt), 0),
+        }
+      })
+      .filter(
+        (x) =>
+          (!product || x.batch.productName === product) &&
+          (!q || `${x.batch.batchNo} ${x.batch.drugName} ${x.batch.baseName}`.toLowerCase().includes(q)) &&
+          (!from || x.date >= from) &&
+          (!to || x.date <= to),
+      )
+      .sort((a, b) => b.date.localeCompare(a.date) || b.batch.createdAt - a.batch.createdAt)
+  }, [db.batches, db.records, product, query, from, to])
+
+  const chosen = selected ? db.batches.find((b) => b.id === selected) : undefined
+  if (chosen) return <BatchRecords batch={chosen} onBack={() => setSelected(null)} onOpenBatch={onOpenBatch} />
+
+  const products = [...new Set(db.batches.map((b) => b.productName))]
+
+  function downloadAll() {
+    const ids = new Set(list.map((x) => x.batch.id))
+    const rows = db.records.filter((r) => ids.has(r.batchId)).sort((a, b) => a.batchNo.localeCompare(b.batchNo) || a.dispenserId.localeCompare(b.dispenserId) || a.seq - b.seq)
+    const recIds = new Set(rows.map((r) => r.id))
+    const name = `IPC_${product || '전체'}_${from || '처음'}~${to || '현재'}_${ymd(Date.now()).replaceAll('-', '')}.xlsx`
+    const trail = db.audit.filter((a) => (recIds.has(a.targetId) || ids.has(a.targetId)) && (actor.role === 'admin' || a.uid === actor.uid))
+    exportWorkbook(name, rows, db.batches, db.corrections, trail)
+    void logEvent(actor, '엑셀 내보내기', { file: name, batches: list.length, count: rows.length })
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Panel className="p-3">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-5 md:items-end">
+          <Field label="제조일자 시작">
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </Field>
+          <Field label="제조일자 끝">
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </Field>
+          <Field label="제품명">
+            <Select value={product} onChange={(e) => setProduct(e.target.value)}>
+              <option value="">전체</option>
+              {products.map((p) => (
+                <option key={p}>{p}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="배치번호·약액부명·기저부명">
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} />
+          </Field>
+          <Button variant="primary" onClick={downloadAll} disabled={list.every((x) => x.count === 0)} className="col-span-2 md:col-span-1">
+            조회된 배치 엑셀 내보내기
+          </Button>
+        </div>
+      </Panel>
+
+      <div className="num text-sm text-sub">배치 {list.length}건</div>
+
+      {/* PC: 표 */}
+      <Panel className="hidden overflow-x-auto md:block">
+        <table className="num w-full text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs text-sub">
+              {['제조일자', '제품명', '배치번호', '약액부명', '기저부명', 'IPC 기록', '부적합', '테스트', '마지막 기록'].map((h) => (
+                <th key={h} className="px-3 py-2 font-medium whitespace-nowrap">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(({ batch: b, date, count, fails, tests, last }) => (
+              <tr key={b.id} onClick={() => setSelected(b.id)} className="cursor-pointer border-b border-line/60 hover:bg-sunken">
+                <td className="px-3 py-2.5 whitespace-nowrap">{date}</td>
+                <td className="px-3 py-2.5">{b.productName}</td>
+                <td className="px-3 py-2.5 font-semibold">{b.batchNo}</td>
+                <td className="px-3 py-2.5">{b.drugName || '–'}</td>
+                <td className="px-3 py-2.5">{b.baseName || '–'}</td>
+                <td className="px-3 py-2.5">{count}건</td>
+                <td className="px-3 py-2.5">{fails ? `${fails}건` : '–'}</td>
+                <td className="px-3 py-2.5">{tests ? `${tests}건` : '–'}</td>
+                <td className="px-3 py-2.5 whitespace-nowrap">{last ? dateTime(last) : '–'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+
+      {/* 모바일: 카드 */}
+      <ul className="flex flex-col gap-2 md:hidden">
+        {list.map(({ batch: b, date, count, fails, tests }) => (
+          <li key={b.id}>
+            <button type="button" onClick={() => setSelected(b.id)} className="num w-full rounded-xl border border-line bg-panel px-3 py-2.5 text-left">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">{b.batchNo}</span>
+                <span className="text-sm text-sub">{date}</span>
+              </div>
+              <div className="mt-0.5 text-sm">
+                {b.productName} · {b.drugName || '–'} / {b.baseName || '–'}
+              </div>
+              <div className="mt-0.5 text-xs text-sub">
+                IPC {count}건{fails ? ` · 부적합 ${fails}건` : ''}
+                {tests ? ` · 테스트 ${tests}건` : ''}
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {list.length === 0 && <p className="py-8 text-center text-sub">조건에 맞는 배치가 없습니다.</p>}
     </div>
   )
 }

@@ -16,8 +16,6 @@ import {
   getDoc,
   initializeFirestore,
   onSnapshot,
-  persistentLocalCache,
-  persistentMultipleTabManager,
   query,
   serverTimestamp,
   Timestamp,
@@ -46,10 +44,8 @@ export function services(): { auth: Auth; fs: Firestore } {
   if (!app) {
     app = initializeApp(config)
     auth = getAuth(app)
-    fs = initializeFirestore(app, {
-      ignoreUndefinedProperties: true,
-      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-    })
+    // 탭과 기기마다 서버에 직접 연결한다. 탭끼리 연결을 공유하면 뒤에 있는 탭 때문에 저장이 늦게 전달될 수 있다
+    fs = initializeFirestore(app, { ignoreUndefinedProperties: true })
     if (EMULATOR) {
       connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
       connectFirestoreEmulator(fs, '127.0.0.1', 8080)

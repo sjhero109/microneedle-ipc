@@ -5,6 +5,8 @@ import { BAND_LABEL, fmt, signed } from './common'
 export interface TrendPoint {
   seq: number
   tray: number
+  /** 트레이-반복 순서 (예: 1-2) */
+  label?: string
   pulse: number
   /** 측정값(목표 대비 %) */
   pct: number
@@ -131,7 +133,7 @@ export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: T
           className={`pointer-events-none absolute top-1 z-10 rounded-lg border border-line bg-panel px-2.5 py-1.5 text-xs shadow-lg ${tipLeft ? 'left-1' : 'right-1'}`}
         >
           <div className="font-semibold">
-            {h.draft ? '입력 중' : `${h.seq}번째`} · 트레이 {h.tray}
+            {h.draft ? '입력 중' : `${h.seq}번째`} · 트레이 {h.label ?? h.tray}
             {h.startup ? ' · 개시 전' : ''}
           </div>
           <div className="num">

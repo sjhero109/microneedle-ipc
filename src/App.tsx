@@ -144,7 +144,14 @@ function Shell() {
       <main className="flex-1">
         {tab === 'calc' && <CalcTab batch={batch} />}
         {tab === 'logic' && <LogicTab batch={batch} />}
-        {tab === 'history' && <HistoryTab />}
+        {tab === 'history' && (
+          <HistoryTab
+            onOpenBatch={(id) => {
+              select(id)
+              setTab('calc')
+            }}
+          />
+        )}
         {tab === 'admin' && actor.role === 'admin' && <AdminTab />}
       </main>
 
