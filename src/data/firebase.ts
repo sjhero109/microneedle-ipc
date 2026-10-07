@@ -315,7 +315,7 @@ const COLLECTIONS: Record<keyof DbState, string> = {
 }
 
 /** 시각은 브라우저 시계가 아니라 서버 시각으로 남긴다 */
-const TIME_FIELDS = ['createdAt', 'updatedAt', 'requestedAt', 'reviewedAt']
+const TIME_FIELDS = ['createdAt', 'updatedAt', 'requestedAt', 'reviewedAt', 'closedAt']
 
 function plain(data: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}

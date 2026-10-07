@@ -20,7 +20,8 @@
 }
 
 :root {
-  color-scheme: light dark;
+  /* 기기의 다크 모드와 관계없이 PC와 모바일을 같은 밝은 화면으로 보여 준다 */
+  color-scheme: light;
   --bg: #f4f5f7;
   --panel: #ffffff;
   --sunken: #f0f1f4;
@@ -36,26 +37,6 @@
   --bad: #d03b3b;
   --severe: #7c3aed;
   --good: #0c7a0c;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111317;
-    --panel: #1a1d23;
-    --sunken: #14161b;
-    --line: #2e333c;
-    --ink: #eceef2;
-    --sub: #9aa3b2;
-    --accent: #6ea0ff;
-    --accent-ink: #0b1220;
-    --drug: #6ea0ff;
-    --base: #3fc1ae;
-    --warn: #fab219;
-    --warn-ink: #2b1d00;
-    --bad: #f06a6a;
-    --severe: #a98bff;
-    --good: #46c046;
-  }
 }
 
 html,

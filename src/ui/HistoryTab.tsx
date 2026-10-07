@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useActor, useAuth } from '../data/auth'
 import { exportWorkbook } from '../data/excel'
 import { dispenserView, evaluate, trayLabels, unused } from '../data/model'
-import { logEvent, requestCorrection, setExcluded, useDb } from '../data/store'
+import { includeTestRecords, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
 import { DISPENSERS, roleLabel, targetOf } from '../data/types'
 import { TrendChart } from './TrendChart'
@@ -100,6 +100,14 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
       >
         정정 요청
       </Button>
+
+      {actor.role === 'admin' && record.test && (
+        <>
+          <h3 className="mt-5 mb-2 font-semibold">테스트 기록</h3>
+          <p className="mb-2 text-sm text-sub">테스트로 저장되어 계산에 쓰이지 않는 기록입니다. 편입하면 추천 Pulse 계산과 이후 배치의 기준에 반영됩니다.</p>
+          <Button onClick={() => run(async () => (await confirm(), void (await includeTestRecords(actor, [record.id]))))}>계산에 편입</Button>
+        </>
+      )}
 
       {actor.role === 'admin' && (
         <>
@@ -216,6 +224,20 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
     [db.records, batch.id],
   )
   const rows = dispenser ? all.filter((r) => r.dispenserId === dispenser) : all
+  const { confirm } = useAuth()
+  const [note, setNote] = useState('')
+  const [reason, setReason] = useState('')
+  const closed = batch.status === 'closed'
+  const tests = all.filter((r) => r.test)
+  const act = async (fn: () => Promise<string>) => {
+    setNote('')
+    try {
+      await confirm()
+      setNote(await fn())
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : '처리하지 못했습니다.')
+    }
+  }
   const labels = useMemo(() => trayLabels(all), [all])
   const open = openId ? db.records.find((r) => r.id === openId) : undefined
 
@@ -234,6 +256,7 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
     ['약액부명', batch.drugName || '–'],
     ['기저부명', batch.baseName || '–'],
     ['약액부 IPC 배수', `${batch.shots}회`],
+    ['상태', closed ? `완료${batch.closedByName ? ` (${batch.closedByName}${batch.closedAt ? ` · ${dateTime(batch.closedAt)}` : ''})` : ''}` : '진행 중'],
   ]
 
   return (
@@ -244,15 +267,17 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
             ← 배치 목록
           </Button>
           <div className="flex gap-2">
-            <Button onClick={() => onOpenBatch(batch.id)} className="h-10 px-3 text-sm">
-              계산 탭에서 열기
-            </Button>
+            {!closed && (
+              <Button onClick={() => onOpenBatch(batch.id)} className="h-10 px-3 text-sm">
+                IPC 탭에서 열기
+              </Button>
+            )}
             <Button variant="primary" onClick={download} disabled={all.length === 0} className="h-10 px-3 text-sm">
               엑셀 내보내기
             </Button>
           </div>
         </div>
-        <dl className="grid grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-3 xl:grid-cols-6">
+        <dl className="grid grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-3 xl:grid-cols-7">
           {info.map(([k, v]) => (
             <div key={k} className="min-w-0">
               <dt className="text-xs text-sub">{k}</dt>
@@ -261,6 +286,25 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
           ))}
         </dl>
       </Panel>
+
+      {actor.role === 'admin' && (tests.length > 0 || closed) && (
+        <Panel className="flex flex-wrap items-center gap-2 p-3 text-sm">
+          {tests.length > 0 && (
+            <Button className="h-10 px-3 text-sm" onClick={() => act(async () => `테스트 기록 ${await includeTestRecords(actor, tests.map((r) => r.id))}건을 계산에 편입했습니다.`)}>
+              테스트 기록 {tests.length}건 계산에 편입
+            </Button>
+          )}
+          {closed && (
+            <>
+              <Input className="!h-10 min-w-40 flex-1" placeholder="다시 여는 사유 (필수)" value={reason} onChange={(e) => setReason(e.target.value)} />
+              <Button className="h-10 px-3 text-sm" disabled={!reason.trim()} onClick={() => act(async () => (await reopenBatch(actor, batch.id, reason), '배치를 다시 열었습니다.'))}>
+                배치 다시 열기
+              </Button>
+            </>
+          )}
+          {note && <span className="basis-full text-sub">{note}</span>}
+        </Panel>
+      )}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {DISPENSERS.filter((d) => all.some((r) => r.dispenserId === d.id)).map((d) => (
@@ -436,7 +480,7 @@ export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
         <table className="num w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs text-sub">
-              {['제조일자', '제품명', '배치번호', '약액부명', '기저부명', 'IPC 기록', '부적합', '테스트', '마지막 기록'].map((h) => (
+              {['제조일자', '제품명', '배치번호', '상태', '약액부명', '기저부명', 'IPC 기록', '부적합', '테스트', '마지막 기록'].map((h) => (
                 <th key={h} className="px-3 py-2 font-medium whitespace-nowrap">
                   {h}
                 </th>
@@ -449,6 +493,7 @@ export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
                 <td className="px-3 py-2.5 whitespace-nowrap">{date}</td>
                 <td className="px-3 py-2.5">{b.productName}</td>
                 <td className="px-3 py-2.5 font-semibold">{b.batchNo}</td>
+                <td className="px-3 py-2.5 whitespace-nowrap">{b.status === 'closed' ? '완료' : <span className="text-accent">진행 중</span>}</td>
                 <td className="px-3 py-2.5">{b.drugName || '–'}</td>
                 <td className="px-3 py-2.5">{b.baseName || '–'}</td>
                 <td className="px-3 py-2.5">{count}건</td>
@@ -468,7 +513,9 @@ export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
             <button type="button" onClick={() => setSelected(b.id)} className="num w-full rounded-xl border border-line bg-panel px-3 py-2.5 text-left">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold">{b.batchNo}</span>
-                <span className="text-sm text-sub">{date}</span>
+                <span className="text-sm text-sub">
+                  {date} · {b.status === 'closed' ? '완료' : '진행 중'}
+                </span>
               </div>
               <div className="mt-0.5 text-sm">
                 {b.productName} · {b.drugName || '–'} / {b.baseName || '–'}

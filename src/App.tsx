@@ -100,7 +100,8 @@ function Shell() {
   }
   if (!loaded) return <p className="p-8 text-center text-sub">불러오는 중…</p>
 
-  const batch = db.batches.find((b) => b.id === batchId) ?? null
+  // 완료된 배치는 IPC 탭에서 열지 않는다 (다른 사람이 완료 처리한 경우도 바로 닫힌다)
+  const batch = db.batches.find((b) => b.id === batchId && b.status !== 'closed') ?? null
   const select = (id: string | null) => {
     setBatchId(id)
     try {
@@ -112,7 +113,7 @@ function Shell() {
   }
 
   const tabs: [Tab, string][] = [
-    ['calc', '계산'],
+    ['calc', 'IPC'],
     ['logic', '계산 로직'],
     ['history', '결과'],
   ]

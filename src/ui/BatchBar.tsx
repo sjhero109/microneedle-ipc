@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useActor } from '../data/auth'
-import { startBatch, updateBatch, useDb } from '../data/store'
+import { closeBatch, startBatch, updateBatch, useDb } from '../data/store'
 import type { Batch } from '../data/types'
 import { Button, Field, Input, NumInput, Select, fmt, parseNum } from './common'
 
@@ -21,9 +21,12 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const [baseName, setBaseName] = useState<string | null>(null)
   const [shots, setShots] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
+  const [closing, setClosing] = useState(false)
   const [error, setError] = useState('')
 
-  const saved = [...db.batches].sort((a, b) => (b.mfgDate || '').localeCompare(a.mfgDate || '') || b.createdAt - a.createdAt)
+  const saved = db.batches
+    .filter((b) => b.status !== 'closed')
+    .sort((a, b) => (b.mfgDate || '').localeCompare(a.mfgDate || '') || b.createdAt - a.createdAt)
   const names = (key: 'drugName' | 'baseName') => [...new Set(db.batches.map((b) => b[key]).filter(Boolean))]
 
   if (batch && !editing) {
@@ -61,7 +64,35 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
           <Button className="h-10 px-3 text-sm" onClick={() => onSelect(null)}>
             다른 배치
           </Button>
+          <Button variant="danger" className="h-10 px-3 text-sm" onClick={() => setClosing(true)}>
+            배치 완료
+          </Button>
         </div>
+        {closing && (
+          <div className="flex basis-full flex-wrap items-center gap-2 rounded-lg border border-bad/40 bg-bad/5 px-3 py-2.5 text-sm">
+            <span className="min-w-0 flex-1">
+              <b>{batch.batchNo}</b> 배치를 완료 처리합니다. 완료하면 IPC 탭에서 불러오거나 기록을 더할 수 없고, 결과 탭에서만 볼 수 있습니다.
+            </span>
+            <Button
+              variant="danger"
+              className="h-10 px-3 text-sm"
+              onClick={async () => {
+                try {
+                  await closeBatch(actor, batch.id)
+                  onSelect(null)
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : '완료 처리하지 못했습니다.')
+                }
+              }}
+            >
+              완료 확정
+            </Button>
+            <Button className="h-10 px-3 text-sm" onClick={() => setClosing(false)}>
+              취소
+            </Button>
+            {error && <span className="basis-full text-bad">{error}</span>}
+          </div>
+        )}
       </div>
     )
   }
@@ -89,7 +120,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
     }
   }
 
-  const existing = !batch && db.batches.find((b) => b.recipeId === recipeId && b.batchNo === batchNo.trim())
+  const existing = !batch && db.batches.find((b) => b.recipeId === recipeId && b.batchNo === batchNo.trim() && b.status !== 'closed')
 
   return (
     <div className="flex flex-col gap-2">
@@ -138,7 +169,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
               <Input value={batchNo} onChange={(e) => setBatchNo(e.target.value)} list="batch-list" autoComplete="off" />
               <datalist id="batch-list">
                 {db.batches
-                  .filter((b) => b.recipeId === recipeId)
+                  .filter((b) => b.recipeId === recipeId && b.status !== 'closed')
                   .map((b) => (
                     <option key={b.id} value={b.batchNo} />
                   ))}

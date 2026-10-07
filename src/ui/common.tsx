@@ -9,6 +9,8 @@ export const signed = (n: number, digits = 1) => `${n > 0 ? '+' : ''}${n.toFixed
 export const dateTime = (t: number) =>
   new Date(t).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 
+export const timeOnly = (t: number) => new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
+
 /** 입력란의 문자열을 숫자로. 비었거나 숫자가 아니면 null */
 export function parseNum(s: string): number | null {
   if (s.trim() === '') return null

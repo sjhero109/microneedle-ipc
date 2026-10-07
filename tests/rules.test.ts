@@ -405,3 +405,34 @@ describe('잠긴 관리자의 복구', () => {
     await assertSucceeds(setDoc(doc(anon(), 'auditLog', id('audit')), entry))
   })
 })
+
+describe('배치 완료', () => {
+  const close = { status: 'closed', closedAt: serverTimestamp(), closedBy: 'user1', closedByName: '작업자' }
+  const seedClosed = () =>
+    env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore() as unknown as Firestore, 'batches', 'batch1'), { status: 'closed' }))
+
+  it('작업자가 배치를 완료할 수 있다', async () => {
+    await assertSucceeds(withAudit('user', 'batches/batch1', close, { merge: true }))
+  })
+
+  it('완료된 배치에는 기록을 더할 수 없다', async () => {
+    await assertSucceeds(withAudit('user', `records/${id('rec')}`, record('user')))
+    await seedClosed()
+    await assertFails(withAudit('user', `records/${id('rec')}`, record('user')))
+    await assertFails(withAudit('admin', `records/${id('rec')}`, record('admin', { source: 'import' })))
+  })
+
+  it('완료된 배치는 관리자만 다시 열거나 고칠 수 있다', async () => {
+    await seedClosed()
+    await assertFails(withAudit('user', 'batches/batch1', { status: 'open' }, { merge: true }))
+    await assertFails(withAudit('user', 'batches/batch1', { drugName: '변경' }, { merge: true }))
+    await assertSucceeds(withAudit('admin', 'batches/batch1', { status: 'open' }, { merge: true }))
+    await assertSucceeds(withAudit('user', `records/${id('rec')}`, record('user')))
+  })
+
+  it('테스트 기록의 계산 편입은 관리자만 한다', async () => {
+    await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore() as unknown as Firestore, 'records', 'rec1'), { test: true }))
+    await assertFails(withAudit('user', 'records/rec1', { test: false }, { merge: true }))
+    await assertSucceeds(withAudit('admin', 'records/rec1', { test: false }, { merge: true }))
+  })
+})

@@ -5,7 +5,7 @@ import { addRecord, useDb } from '../data/store'
 import type { Batch, DispenserId, MaterialType } from '../data/types'
 import { materialOf } from '../data/types'
 import type { IpcPoint, Phase } from '../engine'
-import { Button, Deviation, Field, NumInput, fmt, parseNum, signed } from './common'
+import { Button, Deviation, Field, NumInput, fmt, parseNum, signed, timeOnly } from './common'
 import { TrendChart, type TrendPoint } from './TrendChart'
 
 const BASIS_NOTE = {
@@ -230,7 +230,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                   <th className="py-1 text-right font-medium">중량</th>
                   <th className="py-1 text-right font-medium">편차</th>
                   <th className="py-1 text-right font-medium">판정</th>
-                  <th className="py-1 pl-2 text-right font-medium">저장</th>
+                  <th className="py-1 pl-2 text-right font-medium">저장 (시각)</th>
                 </tr>
               </thead>
               <tbody>
@@ -247,7 +247,10 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                       <Deviation devPct={r.devPct} band={r.band} />
                     </td>
                     <td className="py-1.5 text-right">{r.pass ? '적합' : '부적합'}</td>
-                    <td className="max-w-20 truncate py-1.5 pl-2 text-right text-xs text-sub">{r.createdByName}</td>
+                    <td className="py-1.5 pl-2 text-right text-xs text-sub">
+                      <span className="block max-w-24 truncate">{r.createdByName}</span>
+                      <span className="block">{timeOnly(r.createdAt)}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>

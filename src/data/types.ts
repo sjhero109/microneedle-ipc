@@ -63,6 +63,10 @@ export interface Batch extends Criteria {
   drugTarget: number
   baseTarget: number
   status: 'open' | 'closed'
+  /** 배치 완료 처리한 시각과 사람 */
+  closedAt?: number
+  closedBy?: string
+  closedByName?: string
   createdAt: number
   createdBy: string
 }

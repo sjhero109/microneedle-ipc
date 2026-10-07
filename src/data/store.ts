@@ -108,6 +108,7 @@ export interface BatchInput {
 /** 같은 제품·배치번호가 있으면 그 배치를 돌려주고, 없으면 새로 만든다 */
 export async function startBatch(actor: Actor, input: BatchInput): Promise<string> {
   const existing = state.batches.find((b) => b.recipeId === input.recipeId && b.batchNo === input.batchNo)
+  if (existing?.status === 'closed') throw new Error('이미 완료된 배치번호입니다. 완료된 배치는 결과 탭에서 볼 수 있습니다.')
   if (existing) return existing.id
   const recipe = state.recipes.find((r) => r.id === input.recipeId)
   if (!recipe) throw new Error('레시피를 찾을 수 없습니다.')
@@ -148,6 +149,37 @@ export async function updateBatch(
   if (Object.keys(changed).length === 0) return
   const prev = Object.fromEntries(Object.keys(changed).map((k) => [k, before[k as keyof Batch]]))
   await commit([{ col: 'batches', id, data: changed }], [audit(actor, '배치 정보 변경', 'batches', id, { before: prev, after: changed })])
+}
+
+/** 공정이 끝난 배치를 닫는다. 닫힌 배치는 불러오거나 기록을 더할 수 없고 결과 탭에서만 본다 */
+export async function closeBatch(actor: Actor, id: string) {
+  const batch = state.batches.find((b) => b.id === id)
+  if (!batch) throw new Error('배치를 찾을 수 없습니다.')
+  if (batch.status === 'closed') return
+  const data = { status: 'closed', closedAt: Date.now(), closedBy: actor.uid, closedByName: actor.name }
+  await commit([{ col: 'batches', id, data }], [audit(actor, '배치 완료', 'batches', id, { before: { status: batch.status }, after: { status: 'closed', batchNo: batch.batchNo } })])
+}
+
+/** 완료한 배치를 관리자가 다시 연다 */
+export async function reopenBatch(actor: Actor, id: string, reason: string) {
+  requireAdmin(actor)
+  const batch = state.batches.find((b) => b.id === id)
+  if (!batch) throw new Error('배치를 찾을 수 없습니다.')
+  await commit([{ col: 'batches', id, data: { status: 'open' } }], [audit(actor, '배치 완료 취소', 'batches', id, { before: { status: batch.status }, after: { status: 'open', batchNo: batch.batchNo }, reason })])
+}
+
+/** 테스트로 남긴 기록을 관리자가 계산에 편입한다 */
+export async function includeTestRecords(actor: Actor, recordIds: string[]) {
+  requireAdmin(actor)
+  const targets = state.records.filter((r) => recordIds.includes(r.id) && r.test)
+  for (let i = 0; i < targets.length; i += IMPORT_CHUNK) {
+    const part = targets.slice(i, i + IMPORT_CHUNK)
+    await commit(
+      part.map((r) => ({ col: 'records', id: r.id, data: { test: false } })),
+      [audit(actor, '테스트 기록 계산 편입', 'records', part[0].id, { before: { test: true }, after: { test: false, records: part.map((r) => r.id), batchNo: part[0].batchNo } })],
+    )
+  }
+  return targets.length
 }
 
 export interface IpcInput {
@@ -212,6 +244,7 @@ function buildRecord(
 export async function addRecord(actor: Actor, batchId: string, dispenserId: DispenserId, input: IpcInput) {
   const batch = state.batches.find((b) => b.id === batchId)
   if (!batch) throw new Error('배치를 찾을 수 없습니다.')
+  if (batch.status === 'closed') throw new Error('완료된 배치에는 기록할 수 없습니다.')
   const seq = (batchRecords(state, batchId, dispenserId).at(-1)?.seq ?? 0) + 1
   const rec = buildRecord(state, actor, batch, dispenserId, input, seq)
   await commit([{ col: 'records', id: rec.id, data: { ...rec } }], [audit(actor, rec.test ? 'IPC 저장 (테스트)' : 'IPC 저장', 'records', rec.id, { after: rec })])
