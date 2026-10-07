@@ -7,6 +7,8 @@ import type { Actor, Role } from './types'
 
 /** 이 시간 동안 입력이 없으면 자동으로 로그아웃한다 */
 const IDLE_MS = 15 * 60 * 1000
+/** 로그아웃 기록이 저장되기를 기다리는 최대 시간 */
+const LOGOUT_WAIT_MS = 3000
 
 interface AuthState {
   mode: 'demo' | 'firebase'
@@ -177,7 +179,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (action: string) => {
       if (actor) {
         try {
-          await logEvent(actor, action)
+          // 네트워크가 끊겨 기록이 전달되지 않아도 로그아웃은 막지 않는다
+          await Promise.race([logEvent(actor, action), new Promise((r) => setTimeout(r, LOGOUT_WAIT_MS))])
         } catch {
           // 기록에 실패해도 로그아웃은 진행한다
         }
