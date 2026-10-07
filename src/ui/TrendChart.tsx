@@ -41,6 +41,7 @@ export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: T
     .map((p, i) => (p.levelPct === null || p.excluded ? null : `${x(i).toFixed(1)},${y(p.levelPct).toFixed(1)}`))
     .filter(Boolean)
     .join(' ')
+  const roomy = Math.abs(y(100 + passLow) - y(100)) >= 11 && Math.abs(y(100 + passHigh) - y(100)) >= 11
   const h = hover === null ? null : points[hover]
   const tipLeft = hover !== null && x(hover) > W / 2
 
@@ -73,10 +74,12 @@ export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: T
         <text x={W - M.r + 4} y={y(adjustPct) + 3.5} fontSize="10" fill="var(--sub)">
           {adjustPct}%
         </text>
-        <text x={M.l - 4} y={y(100 + passLow) + 3.5} textAnchor="end" fontSize="10" fill="var(--sub)">
-          {100 + passLow}
-        </text>
-        {100 + passHigh !== adjustPct && (
+        {roomy && (
+          <text x={M.l - 4} y={y(100 + passLow) + 3.5} textAnchor="end" fontSize="10" fill="var(--sub)">
+            {100 + passLow}
+          </text>
+        )}
+        {roomy && 100 + passHigh !== adjustPct && (
           <text x={M.l - 4} y={y(100 + passHigh) + 3.5} textAnchor="end" fontSize="10" fill="var(--sub)">
             {100 + passHigh}
           </text>

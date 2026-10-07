@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useActor, useAuth } from '../data/auth'
 import { exportWorkbook } from '../data/excel'
-import { trayLabels } from '../data/model'
+import { dispenserView, evaluate, trayLabels, unused } from '../data/model'
 import { logEvent, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
-import { DISPENSERS } from '../data/types'
+import { DISPENSERS, targetOf } from '../data/types'
+import { TrendChart } from './TrendChart'
 import { Button, Deviation, Field, Input, Modal, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
 const FIELD_LABEL: Record<Correction['field'], string> = { tray: '트레이번호', pulse: 'Pulse', totalWeight: '합산 중량' }
@@ -153,7 +154,57 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
 
 const ymd = (t: number) => new Date(t).toLocaleDateString('sv-SE')
 
-/** 배치 한 건의 기록 목록 */
+/** 토출기 한 대의 배치 결과: 횟수, 적합 여부, 평균 편차, Pulse 변화, 추이 */
+function DispenserResult({ batch, dispenser, records, labels }: { batch: Batch; dispenser: (typeof DISPENSERS)[number]; records: IpcRecord[]; labels: Map<string, string> }) {
+  const db = useDb()
+  const target = targetOf(batch, dispenser.type)
+  const used = records.filter((r) => !unused(r))
+  // 추정 수준은 저장 당시 값이 아니라 지금의 계산식으로 다시 그린다
+  const steps = useMemo(() => [...dispenserView(db, batch, dispenser.id).model.steps], [db, batch, dispenser.id])
+  const levels = new Map(used.map((r, i) => [r.id, steps[i]?.levelAtPulse]))
+  const fails = used.filter((r) => !r.pass).length
+  const mean = used.length ? used.reduce((s, r) => s + r.weight, 0) / used.length : null
+  const changes = used.filter((r, i) => i > 0 && r.pulse !== used[i - 1].pulse).length
+  const items: [string, React.ReactNode][] = [
+    ['IPC', `${used.length}회`],
+    ['적합 / 부적합', `${used.length - fails} / ${fails}`],
+    ['평균 중량', mean === null ? '–' : <>{fmt(mean, 3)} mg <Deviation {...evaluate(batch, dispenser.type, mean)} /></>],
+    ['Pulse', used.length ? `${used[0].pulse} → ${used.at(-1)!.pulse} (조정 ${changes}회)` : '–'],
+  ]
+  return (
+    <Panel className={`border-t-4 p-3 ${dispenser.type === 'drug' ? 'border-t-drug' : 'border-t-base'}`}>
+      <h3 className="font-semibold">{dispenser.label}</h3>
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
+        {items.map(([k, v]) => (
+          <div key={k} className="min-w-0">
+            <dt className="text-xs text-sub">{k}</dt>
+            <dd className="num font-semibold">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="mt-2">
+        <TrendChart
+          points={records.map((r) => ({
+            seq: r.seq,
+            tray: r.tray,
+            label: labels.get(r.id),
+            pulse: r.pulse,
+            pct: (r.weight / target) * 100,
+            levelPct: levels.get(r.id) === undefined ? null : (levels.get(r.id)! / target) * 100,
+            band: r.band,
+            excluded: unused(r),
+            test: r.test,
+          }))}
+          adjustPct={batch.adjustPct}
+          passLow={batch.passLowPct}
+          passHigh={batch.passHighPct}
+        />
+      </div>
+    </Panel>
+  )
+}
+
+/** 배치 한 건의 결과와 기록 목록 */
 function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): void; onOpenBatch(id: string): void }) {
   const db = useDb()
   const actor = useActor()
@@ -211,6 +262,13 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
         </dl>
       </Panel>
 
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {DISPENSERS.filter((d) => all.some((r) => r.dispenserId === d.id)).map((d) => (
+          <DispenserResult key={d.id} batch={batch} dispenser={d} records={all.filter((r) => r.dispenserId === d.id).sort((a, b) => a.seq - b.seq)} labels={labels} />
+        ))}
+      </div>
+
+      <h3 className="mt-2 text-sm font-semibold text-sub">IPC 기록</h3>
       <div className="flex gap-1 overflow-x-auto">
         {[{ id: '', label: '전체' }, ...DISPENSERS].map((d) => {
           const n = d.id ? all.filter((r) => r.dispenserId === d.id).length : all.length
@@ -362,7 +420,7 @@ export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
               ))}
             </Select>
           </Field>
-          <Field label="배치번호·약액부명·기저부명">
+          <Field label="배치번호 (약액부명·기저부명으로도 검색)">
             <Input value={query} onChange={(e) => setQuery(e.target.value)} />
           </Field>
           <Button variant="primary" onClick={downloadAll} disabled={list.every((x) => x.count === 0)} className="col-span-2 md:col-span-1">

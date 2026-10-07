@@ -5,6 +5,8 @@ import { DEFAULT_OPTIONS } from './types'
 
 /** 배치 안 기울기 추정에서 사전값이 갖는 무게(IPC 쌍 수) */
 const DRIFT_PRIOR_PAIRS = 4
+/** 배치 안 기울기를 쓰기 위해 필요한 최소 IPC 쌍 수 */
+const DRIFT_MIN_PAIRS = 6
 /** 한 배치 안에서 감도가 사전값에서 벗어날 수 있는 최대 배수 */
 const B_MAX_CHANGE = 5
 
@@ -43,10 +45,13 @@ export function buildBatchModel(
   opts: EngineOptions = DEFAULT_OPTIONS,
 ): BatchModel {
   const used = points.filter((p) => !p.excluded)
+  // 배치 안의 감소 경향도 통계적으로 확인될 때만 쓴다. 잡음을 기울기로 읽으면 추정 수준이 한쪽으로 쏠린다
+  const raw = driftFromPairs([used])
+  const confirmed = raw.pairs >= DRIFT_MIN_PAIRS && Math.abs(raw.drift) > 1.96 * raw.se
   const params: ModelParams = {
     ...prior,
     b: updateSensitivity(prior, used),
-    drift: driftFromPairs([used], prior.drift, DRIFT_PRIOR_PAIRS).drift,
+    drift: confirmed ? driftFromPairs([used], prior.drift, DRIFT_PRIOR_PAIRS).drift : prior.drift,
   }
   return { params, ...runFilter(params, used, opts) }
 }

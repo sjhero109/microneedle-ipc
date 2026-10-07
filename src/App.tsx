@@ -104,7 +104,7 @@ function Shell() {
   const tabs: [Tab, string][] = [
     ['calc', '계산'],
     ['logic', '계산 로직'],
-    ['history', '기록 조회'],
+    ['history', '결과'],
   ]
   if (actor.role === 'admin') tabs.push(['admin', '관리자'])
 
