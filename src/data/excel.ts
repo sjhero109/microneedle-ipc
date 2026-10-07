@@ -107,6 +107,8 @@ export function exportWorkbook(
 export interface ParsedSheet {
   name: string
   rows: ImportRow[]
+  /** 회차(트레이) 열이 있는 표인지 */
+  hasTray: boolean
   /** 엑셀의 중량 열이 합산값인지, 1회분인지 */
   weightKind: 'total' | 'per-shot'
 }
@@ -132,6 +134,7 @@ export function parseImport(data: ArrayBuffer, shots: number): ParsedSheet[] {
     const starts = head.map((c, i) => ({ i, m: /(토출기|기저부)(\d)/.exec(text(c)) })).filter((x) => x.m)
     const rows: ImportRow[] = []
     let weightKind: ParsedSheet['weightKind'] = 'per-shot'
+    let hasTray = false
     starts.forEach((s, k) => {
       const end = starts[k + 1]?.i ?? sub.length
       const cols = sub.map((h, i) => ({ h, i })).filter((c) => c.i >= s.i && c.i < end)
@@ -141,6 +144,7 @@ export function parseImport(data: ArrayBuffer, shots: number): ParsedSheet[] {
       const tray = cols.find((c) => c.h === '회차' || c.h.startsWith('트레이'))?.i
       if (pulse === undefined || (total === undefined && single === undefined)) return
       if (total !== undefined) weightKind = 'total'
+      if (tray !== undefined) hasTray = true
       const dispenserId = `${s.m![1] === '기저부' ? 'B' : 'D'}${s.m![2]}` as DispenserId
       grid.slice(top + 2).forEach((r, idx) => {
         const p = num(r[pulse])
@@ -155,7 +159,7 @@ export function parseImport(data: ArrayBuffer, shots: number): ParsedSheet[] {
         })
       })
     })
-    if (rows.length) out.push({ name, rows, weightKind })
+    if (rows.length) out.push({ name, rows, weightKind, hasTray })
   }
   return out
 }

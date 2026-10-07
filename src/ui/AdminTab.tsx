@@ -180,7 +180,9 @@ function Import() {
   const [baseName, setBaseName] = useState<string | null>(null)
   const [shots, setShots] = useState('3')
   const [file, setFile] = useState<{ name: string; data: ArrayBuffer } | null>(null)
-  const [sheet, setSheet] = useState(0)
+  // 고르기 전에는 회차 열이 있는 시트를 쓴다
+  const [sheet, setSheet] = useState<number | null>(null)
+  const [progress, setProgress] = useState('')
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -195,10 +197,15 @@ function Import() {
       sheets = []
     }
   }
-  const chosen = sheets[Math.min(sheet, sheets.length - 1)]
+  const preferred = Math.max(0, sheets.findIndex((s) => s.hasTray))
+  const sheetIndex = Math.min(sheet ?? preferred, sheets.length - 1)
+  const chosen = sheets[sheetIndex]
   const tally = new Map<string, number>()
   for (const r of chosen?.rows ?? []) tally.set(r.dispenserId, (tally.get(r.dispenserId) ?? 0) + 1)
   const counts = [...tally].map(([k, v]) => `${k} ${v}건`)
+
+  const existing = db.batches.find((b) => b.recipeId === recipeId && b.batchNo === batchNo.trim())
+  const existingCount = existing ? db.records.filter((r) => r.batchId === existing.id).length : 0
 
   async function run() {
     setError('')
@@ -207,7 +214,6 @@ function Import() {
     try {
       if (!recipe || !chosen || !file || !n) throw new Error('파일과 제품을 선택하세요.')
       if (!batchNo.trim()) throw new Error('배치번호를 입력하세요.')
-      if (db.batches.some((b) => b.recipeId === recipe.id && b.batchNo === batchNo.trim())) throw new Error('같은 배치번호가 이미 있습니다. 다른 번호를 쓰세요.')
       await confirm()
       const id = await startBatch(actor, {
         recipeId: recipe.id,
@@ -217,13 +223,14 @@ function Import() {
         baseName: baseName ?? recipe.defaultBaseName,
         shots: n,
       })
-      const count = await importRecords(actor, id, chosen.rows, file.name)
-      setMsg(`${count}건을 가져왔습니다.`)
+      const count = await importRecords(actor, id, chosen.rows, file.name, (done, total) => setProgress(`저장 중 ${done} / ${total}건`))
+      setMsg(count ? `${count}건을 가져왔습니다.` : '이미 모두 들어 있어 새로 가져온 기록이 없습니다.')
       setFile(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '가져오지 못했습니다.')
     } finally {
       setBusy(false)
+      setProgress('')
     }
   }
 
@@ -265,7 +272,7 @@ function Import() {
         onChange={async (e) => {
           const f = e.target.files?.[0]
           setFile(f ? { name: f.name, data: await f.arrayBuffer() } : null)
-          setSheet(0)
+          setSheet(null)
           setMsg('')
         }}
       />
@@ -273,7 +280,7 @@ function Import() {
       {chosen && (
         <div className="rounded-lg border border-line p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={sheet} onChange={(e) => setSheet(Number(e.target.value))} className="!h-10 !w-auto">
+            <Select value={sheetIndex} onChange={(e) => setSheet(Number(e.target.value))} className="!h-10 !w-auto">
               {sheets.map((s, i) => (
                 <option key={s.name} value={i}>
                   {s.name}
@@ -309,6 +316,12 @@ function Import() {
       )}
       {error && <p className="text-sm text-bad">{error}</p>}
       {msg && <p className="text-sm text-good">{msg}</p>}
+      {progress && <p className="num text-sm text-sub">{progress}</p>}
+      {existing && (
+        <p className="text-sm text-sub">
+          이 배치번호는 이미 있습니다. 이 배치에 이어서 넣고, 이미 들어간 기록은 건너뜁니다 (현재 {existingCount}건).
+        </p>
+      )}
       <Button variant="primary" className="self-start" disabled={!chosen || busy} onClick={run}>
         가져오기
       </Button>

@@ -217,7 +217,11 @@ export async function addRecord(actor: Actor, batchId: string, dispenserId: Disp
   await commit([{ col: 'records', id: rec.id, data: { ...rec } }], [audit(actor, rec.test ? 'IPC 저장 (테스트)' : 'IPC 저장', 'records', rec.id, { after: rec })])
 }
 
-const IMPORT_CHUNK = 200
+/**
+ * 한 번에 저장하는 기록 수. 보안 규칙이 기록마다 사용자·audit 문서를 확인하는데,
+ * 실제 서버는 한 묶음에서 확인할 수 있는 문서 수가 20건으로 제한되어 있어 작게 나눈다.
+ */
+const IMPORT_CHUNK = 3
 
 export interface ImportRow {
   dispenserId: DispenserId
@@ -227,14 +231,30 @@ export interface ImportRow {
 }
 
 /** 엑셀에서 읽은 기록을 한 배치로 넣는다. 순서대로 쌓으면서 모델 값도 함께 남긴다 */
-export async function importRecords(actor: Actor, batchId: string, rows: ImportRow[], file: string): Promise<number> {
+export async function importRecords(
+  actor: Actor,
+  batchId: string,
+  rows: ImportRow[],
+  file: string,
+  onProgress?: (done: number, total: number) => void,
+): Promise<number> {
   requireAdmin(actor)
   const batch = state.batches.find((b) => b.id === batchId)
   if (!batch) throw new Error('배치를 찾을 수 없습니다.')
   let working = state
   const created: IpcRecord[] = []
   const seq = new Map<DispenserId, number>()
+  // 가져오다 끊긴 배치에 다시 가져올 때는 이미 들어간 만큼 건너뛴다
+  const skip = new Map<DispenserId, number>()
+  for (const r of state.records) {
+    if (r.batchId === batchId && r.source === 'import') skip.set(r.dispenserId, (skip.get(r.dispenserId) ?? 0) + 1)
+  }
   for (const row of rows) {
+    const left = skip.get(row.dispenserId) ?? 0
+    if (left > 0) {
+      skip.set(row.dispenserId, left - 1)
+      continue
+    }
     const next = (seq.get(row.dispenserId) ?? batchRecords(state, batchId, row.dispenserId).at(-1)?.seq ?? 0) + 1
     seq.set(row.dispenserId, next)
     const rec = buildRecord(working, actor, batch, row.dispenserId, { ...row, phase: row.tray === 1 ? 'startup' : 'routine' }, next, {
@@ -244,9 +264,10 @@ export async function importRecords(actor: Actor, batchId: string, rows: ImportR
     created.push(rec)
     working = { ...working, records: [...working.records, rec] }
   }
-  // 한 번에 저장할 수 있는 문서 수에 맞춰 나눠 저장한다. 묶음마다 audit 기록이 하나씩 남는다
+  // 나눠 저장한다. 묶음마다 audit 기록이 하나씩 남는다
   for (let i = 0; i < created.length; i += IMPORT_CHUNK) {
     const part = created.slice(i, i + IMPORT_CHUNK)
+    onProgress?.(i, created.length)
     await commit(
       part.map((r) => ({ col: 'records', id: r.id, data: { ...r } })),
       [audit(actor, '데이터 가져오기', 'batches', batchId, { after: { file, batchNo: batch.batchNo, from: i + 1, count: part.length, total: created.length } })],
