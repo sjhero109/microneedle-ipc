@@ -287,9 +287,9 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
         </dl>
       </Panel>
 
-      {actor.role === 'admin' && (tests.length > 0 || closed) && (
+      {(closed || (actor.role === 'admin' && tests.length > 0)) && (
         <Panel className="flex flex-wrap items-center gap-2 p-3 text-sm">
-          {tests.length > 0 && (
+          {actor.role === 'admin' && tests.length > 0 && (
             <Button className="h-10 px-3 text-sm" onClick={() => act(async () => `테스트 기록 ${await includeTestRecords(actor, tests.map((r) => r.id))}건을 계산에 편입했습니다.`)}>
               테스트 기록 {tests.length}건 계산에 편입
             </Button>

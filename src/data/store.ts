@@ -160,9 +160,9 @@ export async function closeBatch(actor: Actor, id: string) {
   await commit([{ col: 'batches', id, data }], [audit(actor, '배치 완료', 'batches', id, { before: { status: batch.status }, after: { status: 'closed', batchNo: batch.batchNo } })])
 }
 
-/** 완료한 배치를 관리자가 다시 연다 */
+/** 완료한 배치를 다시 연다. 사유를 남긴다 */
 export async function reopenBatch(actor: Actor, id: string, reason: string) {
-  requireAdmin(actor)
+  if (!reason.trim()) throw new Error('다시 여는 사유를 입력하세요.')
   const batch = state.batches.find((b) => b.id === id)
   if (!batch) throw new Error('배치를 찾을 수 없습니다.')
   await commit([{ col: 'batches', id, data: { status: 'open' } }], [audit(actor, '배치 완료 취소', 'batches', id, { before: { status: batch.status }, after: { status: 'open', batchNo: batch.batchNo }, reason })])

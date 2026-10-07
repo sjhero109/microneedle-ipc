@@ -189,10 +189,10 @@ service cloud.firestore {
       allow create: if active() && audited()
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time;
-      // 완료된 배치는 관리자만 다시 열 수 있다
+      // 완료된 배치는 다시 여는 것만 할 수 있다 (작업자도 가능). 연 뒤에야 내용을 고칠 수 있다
       allow update: if active() && audited()
         && onlyChanges(['drugName', 'baseName', 'shots', 'mfgDate', 'status', 'closedAt', 'closedBy', 'closedByName', 'auditId'])
-        && (resource.data.get('status', 'open') != 'closed' || admin());
+        && (resource.data.get('status', 'open') != 'closed' || request.resource.data.status == 'open');
       allow delete: if false;
     }
 

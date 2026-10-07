@@ -422,11 +422,12 @@ describe('배치 완료', () => {
     await assertFails(withAudit('admin', `records/${id('rec')}`, record('admin', { source: 'import' })))
   })
 
-  it('완료된 배치는 관리자만 다시 열거나 고칠 수 있다', async () => {
+  it('완료된 배치는 다시 열기 전에는 고칠 수 없고, 작업자도 다시 열 수 있다', async () => {
     await seedClosed()
-    await assertFails(withAudit('user', 'batches/batch1', { status: 'open' }, { merge: true }))
     await assertFails(withAudit('user', 'batches/batch1', { drugName: '변경' }, { merge: true }))
-    await assertSucceeds(withAudit('admin', 'batches/batch1', { status: 'open' }, { merge: true }))
+    await assertFails(withAudit('admin', 'batches/batch1', { drugName: '변경' }, { merge: true }))
+    await assertSucceeds(withAudit('user', 'batches/batch1', { status: 'open' }, { merge: true }))
+    await assertSucceeds(withAudit('user', 'batches/batch1', { drugName: '변경' }, { merge: true }))
     await assertSucceeds(withAudit('user', `records/${id('rec')}`, record('user')))
   })
 
