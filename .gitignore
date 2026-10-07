@@ -32,3 +32,4 @@ data/seed/
 .firebase/
 *-debug.log
 !.env.emulator
+dist-hosting/

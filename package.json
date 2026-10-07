@@ -11,7 +11,9 @@
     "test": "vitest run src",
     "test:rules": "firebase emulators:exec --only firestore --project demo-microneedle-ipc \"vitest run tests\"",
     "emulators": "firebase emulators:start --only auth,firestore --project demo-microneedle-ipc",
-    "dev:emu": "vite --mode emulator"
+    "dev:emu": "vite --mode emulator",
+    "build:hosting": "tsc -b && vite build --mode hosting",
+    "deploy": "npm run build:hosting && firebase deploy --only hosting,firestore:rules"
   },
   "dependencies": {
     "firebase": "^12.19.0",
