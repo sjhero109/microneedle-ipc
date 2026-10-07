@@ -5,7 +5,7 @@
 
 - 화면: React + TypeScript + Vite + Tailwind
 - 데이터: Firebase (Firestore + 이메일/비밀번호 로그인), 무료 Spark 요금제
-- 배포: GitHub Pages (`main`에 push하면 자동 배포)
+- 배포: Firebase 호스팅 (https://microneedle-ipc.web.app). `npm run deploy`로 사이트와 보안 규칙을 함께 올린다
 
 ## 실행
 
