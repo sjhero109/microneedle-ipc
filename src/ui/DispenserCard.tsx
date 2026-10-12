@@ -122,7 +122,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         <span className="min-w-0">
           <span className="block font-semibold">{dispenser.label}</span>
           <span className="num block text-xs text-sub">
-            {materialOf(batch, dispenser.type) || '물질명 미입력'} · 목표 {fmt(saved.target, 2)} mg
+            {materialOf(batch, dispenser.type) || '물질명 미입력'} · 목표 {fmt(saved.target, dispenser.type === 'drug' ? 3 : 1)} mg
             {saved.shots > 1 ? ` · 같은 Pulse로 ${saved.shots}회 = ${fmt(totalTarget, 2)} mg` : ''}
           </span>
         </span>

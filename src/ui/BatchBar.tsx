@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useActor } from '../data/auth'
 import { closeBatch, startBatch, updateBatch, useDb } from '../data/store'
 import type { Batch } from '../data/types'
+import { CONTENT_MAX, CONTENT_MIN, baseTargetOf, contentOf, targetForContent } from '../data/types'
 import { Button, Field, Input, NumInput, Select, fmt, parseNum } from './common'
 
 const today = () => new Date().toLocaleDateString('sv-SE')
@@ -20,7 +21,8 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const [drugName, setDrugName] = useState<string | null>(null)
   const [baseName, setBaseName] = useState<string | null>(null)
   const [shots, setShots] = useState<string | null>(null)
-  const [target, setTarget] = useState<string | null>(null)
+  const [content, setContent] = useState<string | null>(null)
+  const batchRecipe = batch ? db.recipes.find((r) => r.id === batch.recipeId) : undefined
   const [editing, setEditing] = useState(false)
   const [closing, setClosing] = useState(false)
   const [error, setError] = useState('')
@@ -37,7 +39,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       ['제조일자', batch.mfgDate],
       ['약액부명', batch.drugName || '–'],
       ['기저부명', batch.baseName || '–'],
-      ['약액부 목표 중량', `${fmt(batch.drugTarget, 2)} mg`],
+      ['약액부 함량 → 목표 중량', `${contentOf(batch, batchRecipe)}% → ${fmt(batch.drugTarget, 3)} mg`],
       ['약액부 IPC 배수', `같은 Pulse로 ${batch.shots}회 (${fmt(batch.drugTarget * batch.shots, 2)} mg)`],
     ]
     return (
@@ -57,7 +59,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
               setDrugName(batch.drugName)
               setBaseName(batch.baseName)
               setShots(String(batch.shots))
-              setTarget(String(batch.drugTarget))
+              setContent(String(contentOf(batch, batchRecipe)))
               setMfgDate(batch.mfgDate)
               setEditing(true)
             }}
@@ -105,24 +107,27 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const shotsText = shots ?? String(recipe?.defaultShots ?? 3)
   const n = parseNum(shotsText)
   const shotsOk = n !== null && Number.isInteger(n) && n >= 1
-  // 약액부 목표 중량은 함량에 따라 배치마다(배치 중에도) 바꿔 쓴다. 비워 두면 레시피 값이다
-  const targetText = target ?? String(batch?.drugTarget ?? recipe?.drugTarget ?? '')
-  const tv = parseNum(targetText)
-  const targetOk = tv !== null && tv > 0
+  // 약액부는 함량(%)을 입력하면 목표 중량을 환산한다: 함량 100% 기준 중량 × 100 ÷ 함량
+  const contentText = content ?? String(batch ? contentOf(batch, batchRecipe) : 100)
+  const cv = parseNum(contentText)
+  const contentOk = cv !== null && cv >= CONTENT_MIN && cv <= CONTENT_MAX
+  const baseTarget = batch ? baseTargetOf(batch, batchRecipe) : recipe?.drugTarget
+  const tv = contentOk && baseTarget ? targetForContent(baseTarget, cv) : null
+  const targetOk = tv !== null
 
   async function submit() {
     setError('')
     try {
       if (!shotsOk) throw new Error('IPC 배수는 1 이상의 정수로 입력하세요.')
-      if (!targetOk) throw new Error('약액부 목표 중량은 0보다 큰 숫자로 입력하세요.')
+      if (!contentOk) throw new Error(`약액부 함량은 ${CONTENT_MIN}~${CONTENT_MAX}% 사이로 입력하세요.`)
       if (batch) {
-        await updateBatch(actor, batch.id, { drugName: drug, baseName: base, shots: n, mfgDate, drugTarget: tv })
+        await updateBatch(actor, batch.id, { drugName: drug, baseName: base, shots: n, mfgDate, contentPct: cv })
         setEditing(false)
         return
       }
       if (!recipe) throw new Error('제품을 선택하세요.')
       if (!batchNo.trim()) throw new Error('배치번호를 입력하세요.')
-      onSelect(await startBatch(actor, { recipeId: recipe.id, batchNo: batchNo.trim(), mfgDate, drugName: drug, baseName: base, shots: n, drugTarget: tv }))
+      onSelect(await startBatch(actor, { recipeId: recipe.id, batchNo: batchNo.trim(), mfgDate, drugName: drug, baseName: base, shots: n, contentPct: cv }))
     } catch (e) {
       setError(e instanceof Error ? e.message : '처리하지 못했습니다.')
     }
@@ -159,7 +164,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
                 setDrugName(null)
                 setBaseName(null)
                 setShots(null)
-                setTarget(null)
+                setContent(null)
               }}
             >
               {recipes.map((r) => (
@@ -205,8 +210,8 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
             ))}
           </datalist>
         </Field>
-        <Field label="약액부 목표 중량 (mg)">
-          <NumInput value={targetText} onChange={(e) => setTarget(e.target.value)} disabled={!!existing} />
+        <Field label="약액부 함량 (%)">
+          <NumInput value={contentText} onChange={(e) => setContent(e.target.value)} disabled={!!existing} />
         </Field>
         <Field label="약액부 IPC 배수">
           <NumInput value={shotsText} onChange={(e) => setShots(e.target.value)} inputMode="numeric" disabled={!!existing} />
@@ -224,13 +229,15 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       </div>
       {recipe && !batch && (
         <p className="num text-xs text-sub">
-          목표 중량: 약액부 {targetOk ? fmt(tv, 2) : '–'} mg{targetOk && shotsOk && n > 1 ? ` (같은 Pulse로 ${n}회 토출한 합계 = ${fmt(tv * n, 2)} mg)` : ''} · 기저부{' '}
+          목표 중량: 약액부 {targetOk ? fmt(tv, 3) : '–'} mg{targetOk ? ` (함량 ${cv}% 환산: ${fmt(baseTarget ?? 0, 2)} × 100 ÷ ${cv})` : ''}
+          {targetOk && shotsOk && n > 1 ? ` · 같은 Pulse로 ${n}회 토출한 합계 ${fmt(tv * n, 2)} mg` : ''} · 기저부{' '}
           {fmt(recipe.baseTarget, 1)} mg
         </p>
       )}
       {batch && (
         <p className="text-xs text-sub">
-          약액부 목표 중량을 바꾸면 그 뒤에 저장하는 IPC부터 새 목표로 판정하고, 추천 Pulse도 새 목표에 맞춰 계산합니다. 이미 저장한 기록의 판정은 바뀌지 않습니다.
+          함량 {contentOk ? cv : '–'}% → 약액부 목표 중량 <b>{targetOk ? fmt(tv, 3) : '–'} mg</b> (= {fmt(baseTarget ?? 0, 2)} × 100 ÷ 함량). 함량을 바꾸면 그 뒤에 저장하는 IPC부터 새
+          목표로 판정하고 추천 Pulse도 새 목표에 맞춰 계산합니다. 이미 저장한 기록의 판정은 바뀌지 않습니다. 기저부 목표 중량은 함량과 무관합니다.
         </p>
       )}
       {error && <p className="text-sm text-bad">{error}</p>}

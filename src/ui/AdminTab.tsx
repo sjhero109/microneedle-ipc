@@ -96,7 +96,7 @@ function RecipeForm({ recipe, first, onDone }: { recipe: Recipe | null; first: b
         <Field label="제품명 (레시피명)" className="col-span-2">
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        {num('drugTarget', '약액부 목표 중량 (mg, 1회)')}
+        {num('drugTarget', '약액부 목표 중량 (mg, 1회, 함량 100% 기준)')}
         {num('baseTarget', '기저부 목표 중량 (mg)')}
         <Field label="기본 약액부명">
           <Input value={drugName} onChange={(e) => setDrugName(e.target.value)} />

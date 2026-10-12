@@ -60,7 +60,12 @@ export interface Batch extends Criteria {
   baseName: string
   /** 약액부 IPC 배수: 이 횟수만큼 토출해 합산 중량을 잰다 */
   shots: number
+  /** 약액부 목표 중량(mg, 1회). 함량에 맞춰 환산한 값이다 */
   drugTarget: number
+  /** 약액부 함량(%). 비어 있으면 100% */
+  contentPct?: number
+  /** 함량 100%일 때의 약액부 목표 중량(mg). 배치를 시작할 때 레시피에서 가져온다 */
+  drugTargetBase?: number
   baseTarget: number
   status: 'open' | 'closed'
   /** 배치 완료 처리한 시각과 사람 */
@@ -92,6 +97,8 @@ export interface IpcRecord {
   phase: Phase
   /** 저장 당시 목표와 판정 */
   target: number
+  /** 저장 당시 약액부 함량(%). 기저부 기록에는 없다 */
+  contentPct?: number
   devPct: number
   band: Band
   pass: boolean
@@ -180,6 +187,27 @@ export interface DbState {
   audit: AuditEntry[]
   users: UserProfile[]
   guards: LoginGuard[]
+}
+
+/** 입력을 받아들이는 함량 범위(%). 오타로 엉뚱한 목표가 잡히는 것을 막는다 */
+export const CONTENT_MIN = 50
+export const CONTENT_MAX = 150
+
+/**
+ * 함량에 맞춘 약액부 목표 중량.
+ * 함량이 100%보다 낮으면 그만큼 더 많이, 높으면 덜 토출해야 유효성분이 100%가 된다.
+ *   목표 중량 = 함량 100% 기준 중량 × 100 ÷ 함량(%)
+ */
+export const targetForContent = (base: number, contentPct: number) => +((base * 100) / contentPct).toFixed(4)
+
+/** 이 배치의 함량 100% 기준 중량. 예전 배치에는 값이 없으므로 레시피 값을 쓴다 */
+export function baseTargetOf(batch: Batch, recipe?: Pick<Recipe, 'drugTarget'>): number {
+  return batch.drugTargetBase ?? recipe?.drugTarget ?? batch.drugTarget
+}
+
+/** 이 배치의 함량(%). 값이 없는 예전 배치는 목표 중량에서 거꾸로 구한다 */
+export function contentOf(batch: Batch, recipe?: Pick<Recipe, 'drugTarget'>): number {
+  return batch.contentPct ?? +((baseTargetOf(batch, recipe) * 100) / batch.drugTarget).toFixed(2)
 }
 
 /** 토출기 파라미터의 이름: 약액부는 Pulse, 기저부는 Speed. 저장 필드 이름은 둘 다 pulse 를 쓴다 */

@@ -4,7 +4,7 @@ import { localBackend, newId, type AuditDraft, type Backend, type Write } from '
 import { firebaseEnabled } from './firebase'
 import { batchRecords, dispenserView, evaluate } from './model'
 import type { Actor, Batch, Correction, DbState, DispenserId, IpcRecord, Recipe, UserProfile } from './types'
-import { DISPENSERS, materialOf, shotsOf, targetOf } from './types'
+import { CONTENT_MAX, CONTENT_MIN, DISPENSERS, baseTargetOf, contentOf, materialOf, shotsOf, targetForContent, targetOf } from './types'
 
 const EMPTY: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [] }
 
@@ -103,8 +103,8 @@ export interface BatchInput {
   drugName: string
   baseName: string
   shots: number
-  /** 약액부 목표 중량(mg). 비우면 레시피 값을 쓴다 */
-  drugTarget?: number
+  /** 약액부 함량(%). 비우면 100% */
+  contentPct?: number
 }
 
 /** 같은 제품·배치번호가 있으면 그 배치를 돌려주고, 없으면 새로 만든다 */
@@ -114,6 +114,8 @@ export async function startBatch(actor: Actor, input: BatchInput): Promise<strin
   if (existing) return existing.id
   const recipe = state.recipes.find((r) => r.id === input.recipeId)
   if (!recipe) throw new Error('레시피를 찾을 수 없습니다.')
+  const content = input.contentPct ?? 100
+  checkContent(content)
   const id = newId()
   const batch: Batch = {
     id,
@@ -124,7 +126,9 @@ export async function startBatch(actor: Actor, input: BatchInput): Promise<strin
     drugName: input.drugName,
     baseName: input.baseName,
     shots: input.shots,
-    drugTarget: input.drugTarget ?? recipe.drugTarget,
+    drugTarget: targetForContent(recipe.drugTarget, content),
+    contentPct: content,
+    drugTargetBase: recipe.drugTarget,
     baseTarget: recipe.baseTarget,
     bands: recipe.bands,
     bandCenterPct: recipe.bandCenterPct,
@@ -140,15 +144,26 @@ export async function startBatch(actor: Actor, input: BatchInput): Promise<strin
   return id
 }
 
+function checkContent(contentPct: number) {
+  if (!(contentPct >= CONTENT_MIN && contentPct <= CONTENT_MAX)) throw new Error(`약액부 함량은 ${CONTENT_MIN}~${CONTENT_MAX}% 사이로 입력하세요.`)
+}
+
 export async function updateBatch(
   actor: Actor,
   id: string,
-  patch: Partial<Pick<Batch, 'drugName' | 'baseName' | 'shots' | 'mfgDate' | 'drugTarget' | 'status'>>,
+  patch: Partial<Pick<Batch, 'drugName' | 'baseName' | 'shots' | 'mfgDate' | 'contentPct' | 'status'>>,
 ) {
   const before = state.batches.find((b) => b.id === id)
   if (!before) throw new Error('배치를 찾을 수 없습니다.')
-  if (patch.drugTarget !== undefined && !(patch.drugTarget > 0)) throw new Error('약액부 목표 중량은 0보다 커야 합니다.')
-  const changed = Object.fromEntries(Object.entries(patch).filter(([k, v]) => before[k as keyof Batch] !== v))
+  const next: Partial<Batch> = { ...patch }
+  // 함량을 바꾸면 목표 중량을 다시 환산한다. 기준 중량(함량 100%)은 그대로다
+  if (patch.contentPct !== undefined) {
+    checkContent(patch.contentPct)
+    const base = baseTargetOf(before, state.recipes.find((r) => r.id === before.recipeId))
+    next.drugTargetBase = base
+    next.drugTarget = targetForContent(base, patch.contentPct)
+  }
+  const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => before[k as keyof Batch] !== v))
   if (Object.keys(changed).length === 0) return
   const prev = Object.fromEntries(Object.keys(changed).map((k) => [k, before[k as keyof Batch]]))
   await commit([{ col: 'batches', id, data: changed }], [audit(actor, '배치 정보 변경', 'batches', id, { before: prev, after: changed })])
@@ -228,6 +243,7 @@ function buildRecord(
     weight,
     phase: input.phase,
     target: targetOf(batch, type),
+    ...(type === 'drug' ? { contentPct: contentOf(batch, db.recipes.find((r) => r.id === batch.recipeId)) } : {}),
     ...evaluate(batch, type, weight),
     recommendedPulse: view.recommendation?.pulse ?? null,
     model: step

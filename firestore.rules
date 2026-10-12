@@ -191,8 +191,10 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time;
       // 완료된 배치는 다시 여는 것만 할 수 있다 (작업자도 가능). 연 뒤에야 내용을 고칠 수 있다
       allow update: if active() && audited()
-        && onlyChanges(['drugName', 'baseName', 'shots', 'mfgDate', 'drugTarget', 'status', 'closedAt', 'closedBy', 'closedByName', 'auditId'])
-        // 약액부 목표 중량은 함량에 따라 배치 중에도 바꿀 수 있다
+        && onlyChanges(['drugName', 'baseName', 'shots', 'mfgDate', 'drugTarget', 'contentPct', 'drugTargetBase', 'status', 'closedAt', 'closedBy', 'closedByName', 'auditId'])
+        // 약액부 목표 중량은 함량에 따라 배치 중에도 바뀐다
+        && request.resource.data.get('contentPct', 100) is number
+        && request.resource.data.get('contentPct', 100) > 0
         && request.resource.data.get('drugTarget', 1) is number
         && request.resource.data.get('drugTarget', 1) > 0
         && (resource.data.get('status', 'open') != 'closed' || request.resource.data.status == 'open');
