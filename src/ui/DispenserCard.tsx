@@ -35,7 +35,8 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   // Pulse 입력란에는 추천값을 미리 넣어 둔다. 직전 IPC가 적합이면 조정하지 않으므로 쓰던 Pulse를 그대로 둔다
   const [pulse, setPulse] = useState(() => {
     const r = saved.recommendation
-    if (lastUsed) return String(lastUsed.pass || !r ? lastUsed.pulse : r.pulse)
+    // 목표 중량이 바뀐 뒤라면 직전 IPC가 적합이었어도 새 목표에 맞춘 추천값을 넣는다
+    if (lastUsed) return String((lastUsed.pass && lastUsed.target === saved.target) || !r ? lastUsed.pulse : r.pulse)
     return r ? String(r.pulse) : last ? String(last.pulse) : ''
   })
   const [total, setTotal] = useState('')
@@ -67,8 +68,8 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         tray: r.tray,
         label: labels.get(r.id),
         pulse: r.pulse,
-        pct: (r.weight / saved.target) * 100,
-        levelPct: s ? (s.levelAtPulse / saved.target) * 100 : null,
+        pct: (r.weight / r.target) * 100,
+        levelPct: s ? (s.levelAtPulse / r.target) * 100 : null,
         band: r.band,
         excluded: unused(r),
         test: r.test,

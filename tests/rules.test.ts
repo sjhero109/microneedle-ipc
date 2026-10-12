@@ -180,7 +180,11 @@ describe('일반 사용자와 관리자', () => {
   it('배치는 약액부명·기저부명·배수 등 정해진 항목만 바꿀 수 있다', async () => {
     await assertSucceeds(withAudit('user', 'batches/batch1', { drugName: '고용량-2', shots: 5 }, { merge: true }))
     await assertFails(withAudit('user', 'batches/batch1', { batchNo: 'B-2' }, { merge: true }))
-    await assertFails(withAudit('user', 'batches/batch1', { drugTarget: 9 }, { merge: true }))
+    await assertFails(withAudit('user', 'batches/batch1', { baseTarget: 9 }, { merge: true }))
+    // 약액부 목표 중량은 바꿀 수 있지만 0 이하나 숫자가 아닌 값은 안 된다
+    await assertSucceeds(withAudit('user', 'batches/batch1', { drugTarget: 7.5 }, { merge: true }))
+    await assertFails(withAudit('user', 'batches/batch1', { drugTarget: 0 }, { merge: true }))
+    await assertFails(withAudit('user', 'batches/batch1', { drugTarget: '7.5' }, { merge: true }))
   })
 
   it('정정은 누구나 요청하고 관리자만 승인한다', async () => {

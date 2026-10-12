@@ -103,6 +103,8 @@ export interface BatchInput {
   drugName: string
   baseName: string
   shots: number
+  /** 약액부 목표 중량(mg). 비우면 레시피 값을 쓴다 */
+  drugTarget?: number
 }
 
 /** 같은 제품·배치번호가 있으면 그 배치를 돌려주고, 없으면 새로 만든다 */
@@ -122,7 +124,7 @@ export async function startBatch(actor: Actor, input: BatchInput): Promise<strin
     drugName: input.drugName,
     baseName: input.baseName,
     shots: input.shots,
-    drugTarget: recipe.drugTarget,
+    drugTarget: input.drugTarget ?? recipe.drugTarget,
     baseTarget: recipe.baseTarget,
     bands: recipe.bands,
     bandCenterPct: recipe.bandCenterPct,
@@ -141,10 +143,11 @@ export async function startBatch(actor: Actor, input: BatchInput): Promise<strin
 export async function updateBatch(
   actor: Actor,
   id: string,
-  patch: Partial<Pick<Batch, 'drugName' | 'baseName' | 'shots' | 'mfgDate' | 'status'>>,
+  patch: Partial<Pick<Batch, 'drugName' | 'baseName' | 'shots' | 'mfgDate' | 'drugTarget' | 'status'>>,
 ) {
   const before = state.batches.find((b) => b.id === id)
   if (!before) throw new Error('배치를 찾을 수 없습니다.')
+  if (patch.drugTarget !== undefined && !(patch.drugTarget > 0)) throw new Error('약액부 목표 중량은 0보다 커야 합니다.')
   const changed = Object.fromEntries(Object.entries(patch).filter(([k, v]) => before[k as keyof Batch] !== v))
   if (Object.keys(changed).length === 0) return
   const prev = Object.fromEntries(Object.keys(changed).map((k) => [k, before[k as keyof Batch]]))

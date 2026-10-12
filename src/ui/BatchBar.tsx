@@ -20,6 +20,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const [drugName, setDrugName] = useState<string | null>(null)
   const [baseName, setBaseName] = useState<string | null>(null)
   const [shots, setShots] = useState<string | null>(null)
+  const [target, setTarget] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [closing, setClosing] = useState(false)
   const [error, setError] = useState('')
@@ -36,11 +37,12 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       ['제조일자', batch.mfgDate],
       ['약액부명', batch.drugName || '–'],
       ['기저부명', batch.baseName || '–'],
+      ['약액부 목표 중량', `${fmt(batch.drugTarget, 2)} mg`],
       ['약액부 IPC 배수', `같은 Pulse로 ${batch.shots}회 (${fmt(batch.drugTarget * batch.shots, 2)} mg)`],
     ]
     return (
       <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-        <dl className="grid min-w-0 flex-1 basis-full grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-3 xl:basis-0 xl:grid-cols-6">
+        <dl className="grid min-w-0 flex-1 basis-full grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-3 xl:basis-0 xl:grid-cols-7">
           {items.map(([k, v]) => (
             <div key={k} className="min-w-0">
               <dt className="text-xs text-sub">{k}</dt>
@@ -55,6 +57,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
               setDrugName(batch.drugName)
               setBaseName(batch.baseName)
               setShots(String(batch.shots))
+              setTarget(String(batch.drugTarget))
               setMfgDate(batch.mfgDate)
               setEditing(true)
             }}
@@ -102,19 +105,24 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const shotsText = shots ?? String(recipe?.defaultShots ?? 3)
   const n = parseNum(shotsText)
   const shotsOk = n !== null && Number.isInteger(n) && n >= 1
+  // 약액부 목표 중량은 함량에 따라 배치마다(배치 중에도) 바꿔 쓴다. 비워 두면 레시피 값이다
+  const targetText = target ?? String(batch?.drugTarget ?? recipe?.drugTarget ?? '')
+  const tv = parseNum(targetText)
+  const targetOk = tv !== null && tv > 0
 
   async function submit() {
     setError('')
     try {
       if (!shotsOk) throw new Error('IPC 배수는 1 이상의 정수로 입력하세요.')
+      if (!targetOk) throw new Error('약액부 목표 중량은 0보다 큰 숫자로 입력하세요.')
       if (batch) {
-        await updateBatch(actor, batch.id, { drugName: drug, baseName: base, shots: n, mfgDate })
+        await updateBatch(actor, batch.id, { drugName: drug, baseName: base, shots: n, mfgDate, drugTarget: tv })
         setEditing(false)
         return
       }
       if (!recipe) throw new Error('제품을 선택하세요.')
       if (!batchNo.trim()) throw new Error('배치번호를 입력하세요.')
-      onSelect(await startBatch(actor, { recipeId: recipe.id, batchNo: batchNo.trim(), mfgDate, drugName: drug, baseName: base, shots: n }))
+      onSelect(await startBatch(actor, { recipeId: recipe.id, batchNo: batchNo.trim(), mfgDate, drugName: drug, baseName: base, shots: n, drugTarget: tv }))
     } catch (e) {
       setError(e instanceof Error ? e.message : '처리하지 못했습니다.')
     }
@@ -139,7 +147,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
           <div className="mt-1 text-xs font-semibold text-sub">새 배치 시작</div>
         </>
       )}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-[1.2fr_1.2fr_1fr_1.2fr_1.2fr_0.8fr_auto] lg:items-end">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-[1.1fr_1.1fr_1fr_1.1fr_1.1fr_0.9fr_0.8fr_auto] lg:items-end">
         <Field label="제품명">
           {batch ? (
             <Input value={batch.productName} disabled />
@@ -151,6 +159,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
                 setDrugName(null)
                 setBaseName(null)
                 setShots(null)
+                setTarget(null)
               }}
             >
               {recipes.map((r) => (
@@ -196,6 +205,9 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
             ))}
           </datalist>
         </Field>
+        <Field label="약액부 목표 중량 (mg)">
+          <NumInput value={targetText} onChange={(e) => setTarget(e.target.value)} disabled={!!existing} />
+        </Field>
         <Field label="약액부 IPC 배수">
           <NumInput value={shotsText} onChange={(e) => setShots(e.target.value)} inputMode="numeric" disabled={!!existing} />
         </Field>
@@ -212,8 +224,13 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       </div>
       {recipe && !batch && (
         <p className="num text-xs text-sub">
-          목표 중량: 약액부 {fmt(recipe.drugTarget, 2)} mg{shotsOk && n > 1 ? ` (같은 Pulse로 ${n}회 토출한 합계 = ${fmt(recipe.drugTarget * n, 2)} mg)` : ''} · 기저부{' '}
+          목표 중량: 약액부 {targetOk ? fmt(tv, 2) : '–'} mg{targetOk && shotsOk && n > 1 ? ` (같은 Pulse로 ${n}회 토출한 합계 = ${fmt(tv * n, 2)} mg)` : ''} · 기저부{' '}
           {fmt(recipe.baseTarget, 1)} mg
+        </p>
+      )}
+      {batch && (
+        <p className="text-xs text-sub">
+          약액부 목표 중량을 바꾸면 그 뒤에 저장하는 IPC부터 새 목표로 판정하고, 추천 Pulse도 새 목표에 맞춰 계산합니다. 이미 저장한 기록의 판정은 바뀌지 않습니다.
         </p>
       )}
       {error && <p className="text-sm text-bad">{error}</p>}

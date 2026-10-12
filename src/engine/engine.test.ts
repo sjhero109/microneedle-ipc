@@ -101,6 +101,20 @@ describe('새 배치', () => {
     expect(Math.abs(f(1, pulse) / (TARGET * 1.05) - 1)).toBeLessThan(0.01)
   })
 
+  it('배치 중에 목표 중량을 바꾸면 추천 Pulse가 새 목표를 따라간다', () => {
+    const f = plant({ level: 6.0, b: 1.2 })
+    const pts = [1, 1, 1].map((tray) => ({ tray, pulse: 3, weight: f(tray, 3) }))
+    const m = buildBatchModel(prior, pts)
+    const ask = (target: number) => recommend({ params: m.params, state: m.state, pulseNow: 3, target, adjustPct: 103, trayInterval: 10, pulseStep: 0.001 })
+    const low = ask(6.11)
+    const high = ask(7.5)
+    // 같은 기록에서 목표만 올리면 Pulse도 올라간다. 목표를 크게 바꾸면 Pulse를 멀리 옮기므로
+    // 감도 추정 오차만큼 빗나갈 수 있고(여기서는 3% 이내), 다음 IPC에서 바로잡힌다
+    expect(high.pulse).toBeGreaterThan(low.pulse)
+    expect(Math.abs(f(1, low.pulse) / (6.11 * 1.03) - 1)).toBeLessThan(0.01)
+    expect(Math.abs(f(1, high.pulse) / (7.5 * 1.03) - 1)).toBeLessThan(0.03)
+  })
+
   it('이상치 한 건에 끌려가지 않는다', () => {
     const f = plant({ level: 6, b: 1.2 })
     const pts = Array.from({ length: 8 }, (_, i) => ({ tray: i + 1, pulse: 3, weight: f(i + 1, 3) }))

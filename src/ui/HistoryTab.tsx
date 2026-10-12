@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useActor, useAuth } from '../data/auth'
 import { exportWorkbook } from '../data/excel'
-import { dispenserView, evaluate, trayLabels, unused } from '../data/model'
+import { dispenserView, trayLabels, unused } from '../data/model'
+import { classify } from '../engine'
 import { includeTestRecords, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
 import { DISPENSERS, paramName, roleLabel, targetOf } from '../data/types'
@@ -165,8 +166,10 @@ const ymd = (t: number) => new Date(t).toLocaleDateString('sv-SE')
 /** 토출기 한 대의 배치 결과: 횟수, 적합 여부, 평균 편차, Pulse 변화, 추이 */
 function DispenserResult({ batch, dispenser, records, labels }: { batch: Batch; dispenser: (typeof DISPENSERS)[number]; records: IpcRecord[]; labels: Map<string, string> }) {
   const db = useDb()
-  const target = targetOf(batch, dispenser.type)
   const used = records.filter((r) => !unused(r))
+  // 배치 중에 목표 중량이 바뀔 수 있으므로 기록마다 저장 당시의 목표로 계산한다
+  const targets = [...new Set(used.map((r) => r.target))]
+  const meanDev = used.length ? used.reduce((s, r) => s + (r.weight / r.target - 1) * 100, 0) / used.length : null
   // 추정 수준은 저장 당시 값이 아니라 지금의 계산식으로 다시 그린다
   const steps = useMemo(() => [...dispenserView(db, batch, dispenser.id).model.steps], [db, batch, dispenser.id])
   const levels = new Map(used.map((r, i) => [r.id, steps[i]?.levelAtPulse]))
@@ -176,7 +179,18 @@ function DispenserResult({ batch, dispenser, records, labels }: { batch: Batch; 
   const items: [string, React.ReactNode][] = [
     ['IPC', `${used.length}회`],
     ['적합 / 부적합', `${used.length - fails} / ${fails}`],
-    ['평균 중량', mean === null ? '–' : <>{fmt(mean, 3)} mg <Deviation {...evaluate(batch, dispenser.type, mean)} /></>],
+    ['목표 중량', targets.length ? `${targets.map((t) => fmt(t, 2)).join(' → ')} mg` : `${fmt(targetOf(batch, dispenser.type), 2)} mg`],
+    [
+      targets.length > 1 ? '평균 편차' : '평균 중량',
+      mean === null || meanDev === null ? (
+        '–'
+      ) : (
+        <>
+          {targets.length > 1 ? '' : `${fmt(mean, 3)} mg `}
+          <Deviation {...classify(100 + meanDev, 100, { limits: batch.bands, centerPct: batch.bandCenterPct })} />
+        </>
+      ),
+    ],
     [paramName(dispenser.type), used.length ? `${used[0].pulse} → ${used.at(-1)!.pulse} (조정 ${changes}회)` : '–'],
   ]
   return (
@@ -197,8 +211,8 @@ function DispenserResult({ batch, dispenser, records, labels }: { batch: Batch; 
             tray: r.tray,
             label: labels.get(r.id),
             pulse: r.pulse,
-            pct: (r.weight / target) * 100,
-            levelPct: levels.get(r.id) === undefined ? null : (levels.get(r.id)! / target) * 100,
+            pct: (r.weight / r.target) * 100,
+            levelPct: levels.get(r.id) === undefined ? null : (levels.get(r.id)! / r.target) * 100,
             band: r.band,
             excluded: unused(r),
             test: r.test,
