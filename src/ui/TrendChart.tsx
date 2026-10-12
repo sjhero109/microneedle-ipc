@@ -25,7 +25,20 @@ const M = { l: 30, r: 34, t: 8, b: 18 }
 const DOT: Record<Band, string> = { ok: 'var(--ink)', yellow: 'var(--warn)', red: 'var(--bad)', purple: 'var(--severe)' }
 
 /** IPC 순서에 따른 중량 추이. 측정값은 점, 추정 수준은 선으로 그린다 */
-export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: TrendPoint[]; adjustPct: number; passLow: number; passHigh: number }) {
+export function TrendChart({
+  points,
+  adjustPct,
+  passLow,
+  passHigh,
+  paramLabel = 'Pulse',
+}: {
+  points: TrendPoint[]
+  adjustPct: number
+  passLow: number
+  passHigh: number
+  /** 파라미터 이름: 약액부 Pulse, 기저부 Speed */
+  paramLabel?: string
+}) {
   const [hover, setHover] = useState<number | null>(null)
   if (points.length === 0) return null
 
@@ -126,7 +139,7 @@ export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: T
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="inline-block h-2 w-0.5 bg-accent" />
-          Pulse 변경
+          {paramLabel} 변경
         </span>
       </div>
 
@@ -141,7 +154,9 @@ export function TrendChart({ points, adjustPct, passLow, passHigh }: { points: T
             측정 {fmt(h.pct, 1)}% ({signed(h.pct - 100)}%) {BAND_LABEL[h.band]}
           </div>
           {h.levelPct !== null && <div className="num">추정 {fmt(h.levelPct, 1)}%</div>}
-          <div className="num">Pulse {h.pulse}</div>
+          <div className="num">
+            {paramLabel} {h.pulse}
+          </div>
           {h.test ? <div>테스트 기록 (계산에 미반영)</div> : h.excluded && <div>계산에서 제외됨</div>}
         </div>
       )}

@@ -30,7 +30,7 @@ export interface Criteria {
   /** 적합 범위(목표 대비 편차 %) */
   passLowPct: number
   passHighPct: number
-  /** Pulse 최소 조정 단위 */
+  /** Pulse·Speed 최소 조정 단위 */
   pulseStep: number
 }
 
@@ -181,6 +181,9 @@ export interface DbState {
   users: UserProfile[]
   guards: LoginGuard[]
 }
+
+/** 토출기 파라미터의 이름: 약액부는 Pulse, 기저부는 Speed. 저장 필드 이름은 둘 다 pulse 를 쓴다 */
+export const paramName = (type: MaterialType) => (type === 'drug' ? 'Pulse' : 'Speed')
 
 export const DEFAULT_CRITERIA: Criteria = {
   bands: [2, 5, 10],

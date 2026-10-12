@@ -4,7 +4,7 @@ import { adminResetPassword, createAccount, firebaseEnabled, sendPasswordReset }
 import { exportWorkbook, parseImport, type ParsedSheet } from '../data/excel'
 import { importRecords, logEvent, logAdminAction, markPasswordReset, reviewCorrection, saveRecipe, saveUser, setExcluded, startBatch, unlockAccount, useDb, type RecipeInput } from '../data/store'
 import type { Recipe, Role, UserProfile } from '../data/types'
-import { DEFAULT_CRITERIA, RESET_PASSWORD, roleLabel } from '../data/types'
+import { DEFAULT_CRITERIA, RESET_PASSWORD, paramName, roleLabel } from '../data/types'
 import { Button, Deviation, Field, Input, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
 type Section = 'recipes' | 'import' | 'review' | 'audit' | 'users'
@@ -105,7 +105,7 @@ function RecipeForm({ recipe, first, onDone }: { recipe: Recipe | null; first: b
           <Input value={baseName} onChange={(e) => setBaseName(e.target.value)} />
         </Field>
         {num('defaultShots', '약액부 IPC 배수 기본값')}
-        {num('pulseStep', 'Pulse 최소 단위')}
+        {num('pulseStep', 'Pulse·Speed 최소 단위')}
         {num('passLowPct', '적합 하한 (목표 대비 %)')}
         {num('passHighPct', '적합 상한 (목표 대비 %)')}
         {num('adjustPct', '조정 희망 비율 (목표 대비 %)')}
@@ -237,7 +237,7 @@ function Import() {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-sub">
-        1행에 "토출기 1" / "기저부 1" 같은 제목, 2행에 "회차 · PULSE · 중량"(또는 "PULSE · 중량*3 · 중량") 열이 있는 엑셀을 한 배치로 가져옵니다.
+        1행에 "토출기 1" / "기저부 1" 같은 제목, 2행에 "회차 · PULSE · 중량"(또는 "PULSE · 중량*3 · 중량") 열이 있는 엑셀을 한 배치로 가져옵니다. 기저부는 PULSE 대신 SPEED 열을 씁니다.
       </p>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
         <Field label="제품명">
@@ -296,7 +296,7 @@ function Import() {
               <tr className="border-b border-line text-left text-xs text-sub">
                 <th className="py-1 font-medium">토출기</th>
                 <th className="py-1 font-medium">트레이</th>
-                <th className="py-1 font-medium">Pulse</th>
+                <th className="py-1 font-medium">Pulse·Speed</th>
                 <th className="py-1 text-right font-medium">합산 중량</th>
               </tr>
             </thead>
@@ -386,7 +386,7 @@ function Review() {
                   {r.productName} / {r.batchNo} · {r.dispenserId} #{r.seq}
                 </span>
                 <span>
-                  Pulse {r.pulse} · {fmt(r.weight, 3)} mg
+                  {paramName(r.materialType)} {r.pulse} · {fmt(r.weight, 3)} mg
                 </span>
                 <Deviation devPct={r.devPct} band={r.band} />
               </div>

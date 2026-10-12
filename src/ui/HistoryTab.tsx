@@ -4,11 +4,11 @@ import { exportWorkbook } from '../data/excel'
 import { dispenserView, evaluate, trayLabels, unused } from '../data/model'
 import { includeTestRecords, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
-import { DISPENSERS, roleLabel, targetOf } from '../data/types'
+import { DISPENSERS, paramName, roleLabel, targetOf } from '../data/types'
 import { TrendChart } from './TrendChart'
 import { Button, Deviation, Field, Input, Modal, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
-const FIELD_LABEL: Record<Correction['field'], string> = { tray: '트레이번호', pulse: 'Pulse', totalWeight: '합산 중량' }
+const FIELD_LABEL: Record<Correction['field'], string> = { tray: '트레이번호', pulse: 'Pulse·Speed', totalWeight: '합산 중량' }
 const STATUS = { pending: '승인 대기', approved: '승인', rejected: '반려' } as const
 
 function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
@@ -36,10 +36,10 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
     ['제품 / 배치', `${record.productName} / ${record.batchNo}`],
     ['토출기 / 물질', `${record.dispenserId} / ${record.materialName || '–'}`],
     ['트레이', `${record.tray}${record.test ? ' (테스트)' : ''}`],
-    ['Pulse', String(record.pulse)],
-    ['합산 중량', `${fmt(record.totalWeight, 3)} mg (같은 Pulse로 ${record.shots}회 토출)`],
+    [paramName(record.materialType), String(record.pulse)],
+    ['합산 중량', record.shots > 1 ? `${fmt(record.totalWeight, 3)} mg (같은 Pulse로 ${record.shots}회 토출)` : `${fmt(record.totalWeight, 3)} mg`],
     ['1회 중량 / 목표', `${fmt(record.weight, 3)} / ${fmt(record.target, 2)} mg`],
-    ['추천 Pulse', record.recommendedPulse === null ? '–' : String(record.recommendedPulse)],
+    [`추천 ${paramName(record.materialType)}`, record.recommendedPulse === null ? '–' : String(record.recommendedPulse)],
     ['추정 수준', record.model ? `${fmt(record.model.level, 3)} mg` : '–'],
     ['작성', `${record.createdByName} · ${dateTime(record.createdAt)}`],
     ['입력 경로', record.source === 'import' ? `가져오기 (${record.importFile})` : '직접 입력'],
@@ -104,7 +104,7 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
       {actor.role === 'admin' && record.test && (
         <>
           <h3 className="mt-5 mb-2 font-semibold">테스트 기록</h3>
-          <p className="mb-2 text-sm text-sub">테스트로 저장되어 계산에 쓰이지 않는 기록입니다. 편입하면 추천 Pulse 계산과 이후 배치의 기준에 반영됩니다.</p>
+          <p className="mb-2 text-sm text-sub">테스트로 저장되어 계산에 쓰이지 않는 기록입니다. 편입하면 추천값 계산과 이후 배치의 기준에 반영됩니다.</p>
           <Button onClick={() => run(async () => (await confirm(), void (await includeTestRecords(actor, [record.id]))))}>계산에 편입</Button>
         </>
       )}
@@ -177,7 +177,7 @@ function DispenserResult({ batch, dispenser, records, labels }: { batch: Batch; 
     ['IPC', `${used.length}회`],
     ['적합 / 부적합', `${used.length - fails} / ${fails}`],
     ['평균 중량', mean === null ? '–' : <>{fmt(mean, 3)} mg <Deviation {...evaluate(batch, dispenser.type, mean)} /></>],
-    ['Pulse', used.length ? `${used[0].pulse} → ${used.at(-1)!.pulse} (조정 ${changes}회)` : '–'],
+    [paramName(dispenser.type), used.length ? `${used[0].pulse} → ${used.at(-1)!.pulse} (조정 ${changes}회)` : '–'],
   ]
   return (
     <Panel className={`border-t-4 p-3 ${dispenser.type === 'drug' ? 'border-t-drug' : 'border-t-base'}`}>
@@ -206,6 +206,7 @@ function DispenserResult({ batch, dispenser, records, labels }: { batch: Batch; 
           adjustPct={batch.adjustPct}
           passLow={batch.passLowPct}
           passHigh={batch.passHighPct}
+          paramLabel={paramName(dispenser.type)}
         />
       </div>
     </Panel>
@@ -334,7 +335,7 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
         <table className="num w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs text-sub">
-              {['토출기', '#', '트레이-회차', '', 'Pulse', '합산 중량', '1회 중량', '편차', '판정', '추천 Pulse', '작성자', '작성시각'].map((h) => (
+              {['토출기', '#', '트레이-회차', '', 'Pulse·Speed', '합산 중량', '1회 중량', '편차', '판정', '추천값', '작성자', '작성시각'].map((h) => (
                 <th key={h} className="px-3 py-2 font-medium whitespace-nowrap">
                   {h}
                 </th>
@@ -377,7 +378,7 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
                 <Deviation devPct={r.devPct} band={r.band} />
               </div>
               <div className="mt-0.5 text-sm">
-                Pulse {r.pulse} · {fmt(r.totalWeight, 2)} mg · {r.pass ? '적합' : '부적합'}
+                {paramName(r.materialType)} {r.pulse} · {fmt(r.totalWeight, 2)} mg · {r.pass ? '적합' : '부적합'}
               </div>
               <div className="mt-0.5 truncate text-xs text-sub">
                 {r.createdByName} · {dateTime(r.createdAt)}

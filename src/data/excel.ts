@@ -25,7 +25,8 @@ export function exportWorkbook(
     순번: r.seq,
     트레이번호: r.tray,
     '트레이-회차': labels.get(r.id) ?? '',
-    Pulse: r.pulse,
+    파라미터: r.materialType === 'drug' ? 'Pulse' : 'Speed',
+    'Pulse·Speed 값': r.pulse,
     'IPC 배수': r.shots,
     '합산 중량(mg)': r.totalWeight,
     '1회 중량(mg)': +r.weight.toFixed(4),
@@ -33,7 +34,7 @@ export function exportWorkbook(
     '편차(%)': +r.devPct.toFixed(2),
     경고: BAND[r.band],
     판정: r.pass ? '적합' : '부적합',
-    '추천 Pulse': r.recommendedPulse ?? '',
+    '추천값': r.recommendedPulse ?? '',
     '추정 수준(mg)': r.model ? +r.model.level.toFixed(4) : '',
     이상치후보: r.outlier ? 'Y' : '',
     테스트: r.test ? 'Y' : '',
@@ -64,7 +65,7 @@ export function exportWorkbook(
           'IPC 횟수': rs.length,
           '평균 편차(%)': +(rs.reduce((s, r) => s + r.devPct, 0) / rs.length).toFixed(2),
           '부적합 횟수': rs.filter((r) => !r.pass).length,
-          'Pulse 조정 횟수': changes,
+          'Pulse·Speed 조정 횟수': changes,
         }
       })
     })
@@ -139,7 +140,7 @@ export function parseImport(data: ArrayBuffer, shots: number): ParsedSheet[] {
     starts.forEach((s, k) => {
       const end = starts[k + 1]?.i ?? sub.length
       const cols = sub.map((h, i) => ({ h, i })).filter((c) => c.i >= s.i && c.i < end)
-      const pulse = cols.find((c) => c.h.startsWith('PULSE'))?.i
+      const pulse = cols.find((c) => c.h.startsWith('PULSE') || c.h.startsWith('SPEED'))?.i
       const total = cols.find((c) => /^중량\*\d/.test(c.h))?.i
       const single = cols.find((c) => c.h === '중량')?.i
       const tray = cols.find((c) => c.h === '회차' || c.h.startsWith('트레이'))?.i
