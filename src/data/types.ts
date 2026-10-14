@@ -51,6 +51,9 @@ export interface Recipe extends Criteria {
 }
 
 export interface Batch extends Criteria {
+  /** 배치에서 따로 정한 조정 목표(%). 없으면 adjustPct */
+  drugAdjustPct?: number
+  baseAdjustPct?: number
   id: string
   recipeId: string
   productName: string
@@ -220,6 +223,19 @@ export const DEFAULT_CRITERIA: Criteria = {
   passLowPct: -5,
   passHighPct: 5,
   pulseStep: 0.001,
+}
+
+/**
+ * 조정 목표(%): 조정할 때 목표 중량의 몇 %에 맞출지. 배치에서 약액부·기저부를 따로 정할 수 있고,
+ * 정하지 않았으면 레시피에서 받은 값을 쓴다
+ */
+export function adjustOf(batch: Batch, type: MaterialType): number {
+  return (type === 'drug' ? batch.drugAdjustPct : batch.baseAdjustPct) ?? batch.adjustPct
+}
+
+/** 조정 목표는 적합 범위 안에서만 정할 수 있다 */
+export function adjustRange(batch: Pick<Batch, 'passLowPct' | 'passHighPct'>): [number, number] {
+  return [100 + batch.passLowPct, 100 + batch.passHighPct]
 }
 
 export function targetOf(batch: Batch, type: MaterialType): number {

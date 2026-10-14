@@ -5,7 +5,7 @@ import { dispenserView, trayLabels, unused } from '../data/model'
 import { classify } from '../engine'
 import { correctDirectly, includeTestRecords, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
-import { DISPENSERS, paramName, roleLabel, targetOf } from '../data/types'
+import { DISPENSERS, adjustOf, paramName, roleLabel, targetOf } from '../data/types'
 import { TrendChart } from './TrendChart'
 import { Button, Deviation, Field, Input, Modal, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
@@ -233,7 +233,7 @@ function DispenserResult({ batch, dispenser, records, labels }: { batch: Batch; 
             excluded: unused(r),
             test: r.test,
           }))}
-          adjustPct={batch.adjustPct}
+          adjustPct={adjustOf(batch, dispenser.type)}
           passLow={batch.passLowPct}
           passHigh={batch.passHighPct}
           paramLabel={paramName(dispenser.type)}

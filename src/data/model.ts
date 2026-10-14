@@ -14,7 +14,7 @@ import {
   type Recommendation,
 } from '../engine'
 import type { Batch, DbState, DispenserId, IpcRecord, MaterialType } from './types'
-import { DISPENSERS, materialOf, shotsOf, targetOf } from './types'
+import { DISPENSERS, adjustOf, materialOf, shotsOf, targetOf } from './types'
 
 /** 계산식에 넣지 않는 기록: 관리자가 제외했거나 테스트로 남긴 기록 */
 export const unused = (r: Pick<IpcRecord, 'excluded' | 'test'>) => r.excluded || r.test === true
@@ -133,7 +133,7 @@ export function dispenserView(db: DbState, batch: Batch, dispenserId: DispenserI
         state: model.state,
         pulseNow,
         target,
-        adjustPct: batch.adjustPct,
+        adjustPct: adjustOf(batch, type),
         trayInterval,
         pulseStep: batch.pulseStep,
       })

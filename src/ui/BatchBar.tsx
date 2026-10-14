@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useActor } from '../data/auth'
 import { closeBatch, startBatch, updateBatch, useDb } from '../data/store'
 import type { Batch } from '../data/types'
-import { CONTENT_MAX, CONTENT_MIN, baseTargetOf, contentOf, targetForContent } from '../data/types'
+import { CONTENT_MAX, CONTENT_MIN, adjustOf, adjustRange, baseTargetOf, contentOf, targetForContent } from '../data/types'
 import { Button, Field, Input, NumInput, Select, fmt, parseNum } from './common'
 
 const today = () => new Date().toLocaleDateString('sv-SE')
@@ -22,6 +22,8 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const [baseName, setBaseName] = useState<string | null>(null)
   const [shots, setShots] = useState<string | null>(null)
   const [content, setContent] = useState<string | null>(null)
+  const [drugAdjust, setDrugAdjust] = useState('')
+  const [baseAdjust, setBaseAdjust] = useState('')
   const batchRecipe = batch ? db.recipes.find((r) => r.id === batch.recipeId) : undefined
   const [editing, setEditing] = useState(false)
   const [closing, setClosing] = useState(false)
@@ -41,10 +43,11 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       ['기저부명', batch.baseName || '–'],
       ['약액부 함량 → 목표 중량', `${contentOf(batch, batchRecipe)}% → ${fmt(batch.drugTarget, 3)} mg`],
       ['약액부 IPC 배수', `같은 Pulse로 ${batch.shots}회 (${fmt(batch.drugTarget * batch.shots, 2)} mg)`],
+      ['조정 목표 (약액부 / 기저부)', `${adjustOf(batch, 'drug')}% / ${adjustOf(batch, 'base')}%`],
     ]
     return (
       <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-        <dl className="grid min-w-0 flex-1 basis-full grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-3 xl:basis-0 xl:grid-cols-7">
+        <dl className="grid min-w-0 flex-1 basis-full grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-3 xl:basis-0 xl:grid-cols-8">
           {items.map(([k, v]) => (
             <div key={k} className="min-w-0">
               <dt className="text-xs text-sub">{k}</dt>
@@ -60,6 +63,8 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
               setBaseName(batch.baseName)
               setShots(String(batch.shots))
               setContent(String(contentOf(batch, batchRecipe)))
+              setDrugAdjust(String(adjustOf(batch, 'drug')))
+              setBaseAdjust(String(adjustOf(batch, 'base')))
               setMfgDate(batch.mfgDate)
               setEditing(true)
             }}
@@ -121,7 +126,11 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       if (!shotsOk) throw new Error('IPC 배수는 1 이상의 정수로 입력하세요.')
       if (!contentOk) throw new Error(`약액부 함량은 ${CONTENT_MIN}~${CONTENT_MAX}% 사이로 입력하세요.`)
       if (batch) {
-        await updateBatch(actor, batch.id, { drugName: drug, baseName: base, shots: n, mfgDate, contentPct: cv })
+        const [lo, hi] = adjustRange(batch)
+        const da = parseNum(drugAdjust)
+        const ba = parseNum(baseAdjust)
+        if (da === null || ba === null || da < lo || da > hi || ba < lo || ba > hi) throw new Error(`조정 목표는 적합 범위(${lo}~${hi}%) 안에서 입력하세요.`)
+        await updateBatch(actor, batch.id, { drugName: drug, baseName: base, shots: n, mfgDate, contentPct: cv, drugAdjustPct: da, baseAdjustPct: ba })
         setEditing(false)
         return
       }
@@ -216,6 +225,16 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
         <Field label="약액부 IPC 배수">
           <NumInput value={shotsText} onChange={(e) => setShots(e.target.value)} inputMode="numeric" disabled={!!existing} />
         </Field>
+        {batch && (
+          <>
+            <Field label="약액부 조정 목표 (%)">
+              <NumInput value={drugAdjust} onChange={(e) => setDrugAdjust(e.target.value)} />
+            </Field>
+            <Field label="기저부 조정 목표 (%)">
+              <NumInput value={baseAdjust} onChange={(e) => setBaseAdjust(e.target.value)} />
+            </Field>
+          </>
+        )}
         <div className="col-span-2 flex gap-2 sm:col-span-3 lg:col-span-1">
           <Button variant="primary" onClick={submit} className="flex-1">
             {batch ? '저장' : existing ? '배치 불러오기' : '배치 시작'}
@@ -238,6 +257,9 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
         <p className="text-xs text-sub">
           함량 {contentOk ? cv : '–'}% → 약액부 목표 중량 <b>{targetOk ? fmt(tv, 3) : '–'} mg</b> (= {fmt(baseTarget ?? 0, 2)} × 100 ÷ 함량). 함량을 바꾸면 그 뒤에 저장하는 IPC부터 새
           목표로 판정하고 추천 Pulse도 새 목표에 맞춰 계산합니다. 이미 저장한 기록의 판정은 바뀌지 않습니다. 기저부 목표 중량은 함량과 무관합니다.
+          <br />
+          조정 목표는 추천 Pulse·Speed를 계산할 때 맞추는 중량(목표 대비 %)입니다. 적합 범위({adjustRange(batch)[0]}~{adjustRange(batch)[1]}%) 안에서 약액부와 기저부를
+          따로 정할 수 있고, 적합 판정 기준은 바뀌지 않습니다.
         </p>
       )}
       {error && <p className="text-sm text-bad">{error}</p>}

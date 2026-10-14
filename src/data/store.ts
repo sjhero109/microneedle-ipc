@@ -4,7 +4,7 @@ import { localBackend, newId, type AuditDraft, type Backend, type Write } from '
 import { firebaseEnabled } from './firebase'
 import { batchRecords, dispenserView, evaluate } from './model'
 import type { Actor, Batch, Correction, DbState, DispenserId, IpcRecord, Recipe, UserProfile } from './types'
-import { CONTENT_MAX, CONTENT_MIN, DISPENSERS, baseTargetOf, contentOf, materialOf, shotsOf, targetForContent, targetOf } from './types'
+import { CONTENT_MAX, CONTENT_MIN, DISPENSERS, adjustOf, adjustRange, baseTargetOf, contentOf, materialOf, shotsOf, targetForContent, targetOf } from './types'
 
 const EMPTY: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [] }
 
@@ -151,11 +151,15 @@ function checkContent(contentPct: number) {
 export async function updateBatch(
   actor: Actor,
   id: string,
-  patch: Partial<Pick<Batch, 'drugName' | 'baseName' | 'shots' | 'mfgDate' | 'contentPct' | 'status'>>,
+  patch: Partial<Pick<Batch, 'drugName' | 'baseName' | 'shots' | 'mfgDate' | 'contentPct' | 'drugAdjustPct' | 'baseAdjustPct' | 'status'>>,
 ) {
   const before = state.batches.find((b) => b.id === id)
   if (!before) throw new Error('배치를 찾을 수 없습니다.')
   const next: Partial<Batch> = { ...patch }
+  const [lo, hi] = adjustRange(before)
+  for (const v of [patch.drugAdjustPct, patch.baseAdjustPct]) {
+    if (v !== undefined && !(v >= lo && v <= hi)) throw new Error(`조정 목표는 적합 범위(${lo}~${hi}%) 안에서 입력하세요.`)
+  }
   // 함량을 바꾸면 목표 중량을 다시 환산한다. 기준 중량(함량 100%)은 그대로다
   if (patch.contentPct !== undefined) {
     checkContent(patch.contentPct)
@@ -163,9 +167,11 @@ export async function updateBatch(
     next.drugTargetBase = base
     next.drugTarget = targetForContent(base, patch.contentPct)
   }
-  const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => before[k as keyof Batch] !== v))
+  // 조정 목표는 따로 정한 적이 없으면 레시피 값과 비교한다
+  const current = { ...before, drugAdjustPct: adjustOf(before, 'drug'), baseAdjustPct: adjustOf(before, 'base') }
+  const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => current[k as keyof Batch] !== v))
   if (Object.keys(changed).length === 0) return
-  const prev = Object.fromEntries(Object.keys(changed).map((k) => [k, before[k as keyof Batch]]))
+  const prev = Object.fromEntries(Object.keys(changed).map((k) => [k, current[k as keyof Batch]]))
   await commit([{ col: 'batches', id, data: changed }], [audit(actor, '배치 정보 변경', 'batches', id, { before: prev, after: changed })])
 }
 

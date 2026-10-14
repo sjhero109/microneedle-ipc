@@ -188,6 +188,10 @@ describe('일반 사용자와 관리자', () => {
     // 함량을 바꾸면 목표 중량과 함께 저장된다
     await assertSucceeds(withAudit('user', 'batches/batch1', { contentPct: 95, drugTargetBase: 6.11, drugTarget: 6.4316 }, { merge: true }))
     await assertFails(withAudit('user', 'batches/batch1', { contentPct: 0 }, { merge: true }))
+    // 조정 목표(%)도 배치에서 바꿀 수 있다
+    await assertSucceeds(withAudit('user', 'batches/batch1', { drugAdjustPct: 102, baseAdjustPct: 101 }, { merge: true }))
+    await assertFails(withAudit('user', 'batches/batch1', { baseAdjustPct: '101' }, { merge: true }))
+    await assertFails(withAudit('user', 'batches/batch1', { adjustPct: 101 }, { merge: true }))
   })
 
   it('정정은 누구나 요청하고 관리자만 승인한다', async () => {

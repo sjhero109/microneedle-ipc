@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Batch } from '../data/types'
-import { DISPENSERS, targetOf } from '../data/types'
+import { DISPENSERS, adjustOf, targetOf } from '../data/types'
 import { DispenserCard } from './DispenserCard'
 
 export function CalcTab({ batch }: { batch: Batch | null }) {
@@ -26,7 +26,7 @@ export function CalcTab({ batch }: { batch: Batch | null }) {
         </h2>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {drug.map((d) => (
-            <DispenserCard key={`${batch.id}-${d.id}-${targetOf(batch, d.type)}`} batch={batch} dispenser={d} testMode={testMode} />
+            <DispenserCard key={`${batch.id}-${d.id}-${targetOf(batch, d.type)}-${adjustOf(batch, d.type)}`} batch={batch} dispenser={d} testMode={testMode} />
           ))}
         </div>
       </section>
@@ -37,7 +37,7 @@ export function CalcTab({ batch }: { batch: Batch | null }) {
         </h2>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {base.map((d) => (
-            <DispenserCard key={`${batch.id}-${d.id}-${targetOf(batch, d.type)}`} batch={batch} dispenser={d} testMode={testMode} />
+            <DispenserCard key={`${batch.id}-${d.id}-${targetOf(batch, d.type)}-${adjustOf(batch, d.type)}`} batch={batch} dispenser={d} testMode={testMode} />
           ))}
         </div>
       </section>

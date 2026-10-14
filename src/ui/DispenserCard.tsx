@@ -3,7 +3,7 @@ import { useActor } from '../data/auth'
 import { dispenserView, evaluate, trayLabels, unused } from '../data/model'
 import { addRecord, useDb } from '../data/store'
 import type { Batch, DispenserId, MaterialType } from '../data/types'
-import { materialOf, paramName } from '../data/types'
+import { adjustOf, materialOf, paramName } from '../data/types'
 import type { IpcPoint, Phase } from '../engine'
 import { Button, Deviation, Field, NumInput, fmt, parseNum, signed, timeOnly } from './common'
 import { TrendChart, type TrendPoint } from './TrendChart'
@@ -116,7 +116,8 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const rows = showAll ? saved.records : saved.records.slice(-4)
   const accent = dispenser.type === 'drug' ? 'border-t-drug' : 'border-t-base'
   const totalTarget = saved.target * saved.shots
-  const adjustTarget = (saved.target * batch.adjustPct) / 100
+  const adjustPct = adjustOf(batch, dispenser.type)
+  const adjustTarget = (saved.target * adjustPct) / 100
   const historyCount = view.prior.params.n
 
   return (
@@ -139,7 +140,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-accent">추천 {param}</span>
           <span className="num text-xs text-sub">
-            목표의 {batch.adjustPct}% = {fmt(adjustTarget, 3)} mg
+            목표의 {adjustPct}% = {fmt(adjustTarget, 3)} mg
           </span>
         </div>
         {rec && view.pulseNow !== null ? (
@@ -225,7 +226,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
           </div>
         )}
 
-        <TrendChart points={points} adjustPct={batch.adjustPct} passLow={batch.passLowPct} passHigh={batch.passHighPct} paramLabel={param} />
+        <TrendChart points={points} adjustPct={adjustPct} passLow={batch.passLowPct} passHigh={batch.passHighPct} paramLabel={param} />
 
         {saved.records.length > 0 && (
           <div>
