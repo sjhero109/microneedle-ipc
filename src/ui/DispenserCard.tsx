@@ -110,7 +110,8 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
     }
   }
 
-  const trayBack = t !== null && last && t < last.tray
+  // 0번(생산 전 세팅)은 언제든 다시 잴 수 있고, 테스트·제외 기록은 순서 비교에 쓰지 않는다
+  const trayBack = t !== null && !noTray && lastUsed && t < lastUsed.tray
   const note = BASIS_NOTE[view.prior.basis]
   const rows = showAll ? saved.records : saved.records.slice(-4)
   const accent = dispenser.type === 'drug' ? 'border-t-drug' : 'border-t-base'
@@ -188,7 +189,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         {testMode && <p className="rounded-lg bg-warn/15 px-3 py-2 text-xs">테스트 중 – 이 값은 기록만 남고 추천 {param} 계산에 반영되지 않습니다.</p>}
         <p className="text-xs text-sub">트레이번호 0 = 생산 전 세팅 (트레이 없이 측정)</p>
         {noTray && <p className="rounded-lg bg-sunken px-3 py-2 text-xs">생산 전 세팅 – 트레이 없이 측정한 값으로 저장합니다.</p>}
-        {trayBack && <p className="text-xs text-bad">트레이번호가 직전 기록({last.tray})보다 작습니다.</p>}
+        {trayBack && <p className="text-xs text-sub">참고: 트레이번호가 직전 기록({lastUsed.tray})보다 작습니다. 저장은 가능합니다.</p>}
         {error && <p className="text-xs text-bad">{error}</p>}
 
         {draft && verdict && (
