@@ -4,7 +4,7 @@ import { adminResetPassword, createAccount, firebaseEnabled, sendPasswordReset }
 import { exportWorkbook, parseImport, type ParsedSheet } from '../data/excel'
 import { importRecords, logEvent, logAdminAction, markPasswordReset, reviewCorrection, saveRecipe, saveUser, setExcluded, startBatch, unlockAccount, useDb, type RecipeInput } from '../data/store'
 import type { Recipe, Role, UserProfile } from '../data/types'
-import { DEFAULT_CRITERIA, RESET_PASSWORD, paramName, roleLabel } from '../data/types'
+import { CORRECTION_LABEL, DEFAULT_CRITERIA, RESET_PASSWORD, paramName, roleLabel } from '../data/types'
 import { Button, Deviation, Field, Input, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
 type Section = 'recipes' | 'import' | 'review' | 'audit' | 'users'
@@ -357,7 +357,7 @@ function Review() {
             return (
               <li key={c.id} className="num rounded-lg border border-line p-3 text-sm">
                 <div className="font-medium">
-                  {r?.productName} / {r?.batchNo} · {r?.dispenserId} #{r?.seq} — {c.field} {c.oldValue} → {c.newValue}
+                  {r?.productName} / {r?.batchNo} · {r?.dispenserId} #{r?.seq} — {CORRECTION_LABEL[c.field]} {c.oldValue} → {c.newValue}
                 </div>
                 <div className="text-xs text-sub">
                   {c.requestedByName} · {dateTime(c.requestedAt)} · {c.reason}

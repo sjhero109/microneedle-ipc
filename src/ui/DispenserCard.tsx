@@ -7,6 +7,7 @@ import { adjustOf, materialOf, paramName } from '../data/types'
 import type { IpcPoint, Phase } from '../engine'
 import { Button, Deviation, Field, NumInput, fmt, parseNum, signed, timeOnly } from './common'
 import { TrendChart, type TrendPoint } from './TrendChart'
+import { RecordDetail } from './HistoryTab'
 
 const BASIS_NOTE = {
   'same-material': null,
@@ -39,6 +40,8 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   })
   const [total, setTotal] = useState('')
   const [showAll, setShowAll] = useState(false)
+  const [openId, setOpenId] = useState<string | null>(null)
+  const openRecord = saved.records.find((r) => r.id === openId)
   const [open, setOpen] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -247,7 +250,12 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className={`border-b border-line/60 ${r.excluded ? 'text-sub line-through' : r.test ? 'text-sub' : ''}`}>
+                  <tr
+                    key={r.id}
+                    onClick={() => setOpenId(r.id)}
+                    title="눌러서 상세·정정"
+                    className={`cursor-pointer border-b border-line/60 hover:bg-sunken ${r.excluded ? 'text-sub line-through' : r.test ? 'text-sub' : ''}`}
+                  >
                     <td className="py-1.5">{r.seq}</td>
                     <td className="py-1.5">
                       {labels.get(r.id) ?? r.tray}
@@ -267,6 +275,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                 ))}
               </tbody>
             </table>
+            <p className="mt-1 text-xs text-sub">기록을 누르면 상세를 보고 트레이번호·{param}·중량을 정정할 수 있습니다.</p>
             {saved.records.length > 4 && (
               <button type="button" className="mt-1 h-9 text-xs text-accent" onClick={() => setShowAll((s) => !s)}>
                 {showAll ? '최근 4건만 보기' : `전체 ${saved.records.length}건 보기`}
@@ -275,6 +284,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
           </div>
         )}
       </div>
+      {openRecord && <RecordDetail record={openRecord} onClose={() => setOpenId(null)} />}
     </article>
   )
 }

@@ -5,17 +5,18 @@ import { dispenserView, trayLabels, unused } from '../data/model'
 import { classify } from '../engine'
 import { correctDirectly, includeTestRecords, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
-import { DISPENSERS, adjustOf, paramName, roleLabel, targetOf } from '../data/types'
+import { CORRECTION_LABEL, DISPENSERS, adjustOf, paramName, roleLabel, targetOf } from '../data/types'
 import { TrendChart } from './TrendChart'
 import { Button, Deviation, Field, Input, Modal, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
-const FIELD_LABEL: Record<Correction['field'], string> = { tray: '트레이번호', pulse: 'Pulse·Speed', totalWeight: '합산 중량' }
+const FIELD_LABEL = CORRECTION_LABEL
 const STATUS = { pending: '승인 대기', approved: '승인', rejected: '반려' } as const
 
-function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
+/** IPC 기록 한 건의 상세. 결과 탭과 IPC 탭의 기록 목록에서 연다 */
+export function RecordDetail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
   const db = useDb()
   const actor = useActor()
-  const [field, setField] = useState<Correction['field']>('totalWeight')
+  const [field, setField] = useState<Correction['field']>('tray')
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
   const [exReason, setExReason] = useState('')
@@ -71,17 +72,24 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
 
       <h3 className="mt-5 mb-2 font-semibold">정정 요청</h3>
       <div className="grid grid-cols-2 gap-2">
-        <Field label="항목">
-          <Select value={field} onChange={(e) => setField(e.target.value as Correction['field'])}>
-            {Object.entries(FIELD_LABEL).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v} (현재 {record[k as Correction['field']]})
-              </option>
+        <div className="col-span-2">
+          <div className="mb-1 text-xs text-sub">정정할 항목</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {(Object.keys(FIELD_LABEL) as Correction['field'][]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setField(k)}
+                className={`num rounded-lg border px-2 py-2 text-sm ${field === k ? 'border-accent bg-accent/10 font-semibold text-accent' : 'border-line hover:bg-sunken'}`}
+              >
+                {FIELD_LABEL[k]}
+                <span className="block text-xs text-sub">현재 {record[k]}</span>
+              </button>
             ))}
-          </Select>
-        </Field>
-        <Field label="정정할 값">
-          <NumInput value={value} onChange={(e) => setValue(e.target.value)} />
+          </div>
+        </div>
+        <Field label={`정정할 ${FIELD_LABEL[field]}`} className="col-span-2">
+          <NumInput value={value} onChange={(e) => setValue(e.target.value)} placeholder={field === 'tray' ? '예: 0 (생산 전 세팅), 1, 2 …' : ''} />
         </Field>
         <Field label="사유 (필수)" className="col-span-2">
           <Input value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -419,7 +427,7 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
       </ul>
 
       {rows.length === 0 && <p className="py-8 text-center text-sub">기록이 없습니다.</p>}
-      {open && <Detail record={open} onClose={() => setOpenId(null)} />}
+      {open && <RecordDetail record={open} onClose={() => setOpenId(null)} />}
     </div>
   )
 }

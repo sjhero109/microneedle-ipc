@@ -120,6 +120,9 @@ export interface IpcRecord {
   createdByName: string
 }
 
+/** 정정할 수 있는 항목의 이름 */
+export const CORRECTION_LABEL = { tray: '트레이번호', pulse: 'Pulse·Speed', totalWeight: '합산 중량' } as const
+
 export interface Correction {
   id: string
   recordId: string

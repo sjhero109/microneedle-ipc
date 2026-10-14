@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx'
 import { trayLabels } from './model'
 import type { ImportRow } from './store'
 import type { AuditEntry, Batch, Correction, DispenserId, IpcRecord } from './types'
-import { roleLabel } from './types'
+import { CORRECTION_LABEL, roleLabel } from './types'
 
 const BAND = { ok: '', yellow: '주의', red: '경고', purple: '이탈' } as const
 
@@ -79,7 +79,7 @@ export function exportWorkbook(
     .filter((c) => recIds.has(c.recordId))
     .map((c) => ({
       기록ID: c.recordId,
-      항목: c.field,
+      항목: CORRECTION_LABEL[c.field],
       '정정 전': c.oldValue,
       '정정 후': c.newValue,
       사유: c.reason,
