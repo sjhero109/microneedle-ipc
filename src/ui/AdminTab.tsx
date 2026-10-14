@@ -461,7 +461,6 @@ function Users() {
   const { confirm } = useAuth()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [role, setRole] = useState<Role>('user')
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
@@ -550,9 +549,6 @@ function Users() {
           <Field label="이메일">
             <Input type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
-          <Field label="임시 비밀번호 (6자 이상)">
-            <Input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          </Field>
           <Field label="권한">
             <Select value={role} onChange={(e) => setRole(e.target.value as Role)}>
               <option value="user">일반 사용자</option>
@@ -563,15 +559,14 @@ function Users() {
         <Button
           variant="primary"
           className="mt-2"
-          disabled={!name.trim() || !email.trim() || password.length < 6}
+          disabled={!name.trim() || !email.trim()}
           onClick={() =>
             run(async () => {
-              const uid = await createAccount(email.trim(), password)
+              const uid = await createAccount(email.trim(), RESET_PASSWORD)
               await saveUser(actor, { uid, name: name.trim(), email: email.trim(), role, active: true, mustChangePassword: true })
-              setMsg(name.trim() + " 계정을 만들었습니다.")
+              setMsg(`${name.trim()} 계정을 만들었습니다. 초기 비밀번호는 ${RESET_PASSWORD}이고, 첫 로그인 때 새 비밀번호를 정하게 됩니다.`)
               setName('')
               setEmail('')
-              setPassword('')
             })
           }
         >

@@ -53,6 +53,8 @@ service cloud.firestore {
         && d.email == request.auth.token.email
         && d.name is string
         && d.createdAt == request.time
+        // 가입할 때는 초기 비밀번호를 쓰므로 첫 로그인 때 반드시 바꾸게 한다
+        && d.get('mustChangePassword', false) == true
         && ((d.role == 'user' && d.active == false && d.pending == true)
             || (d.role == 'admin' && d.active == true && first));
     }

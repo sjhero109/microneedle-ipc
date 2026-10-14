@@ -234,6 +234,7 @@ describe('앱에서 직접 가입', () => {
     role: 'user',
     active: false,
     pending: true,
+    mustChangePassword: true,
     createdAt: serverTimestamp(),
     ...over,
   })
@@ -265,6 +266,13 @@ describe('앱에서 직접 가입', () => {
   it('그 뒤 가입자는 승인 대기 상태로만 만들 수 있다', async () => {
     await markSetupDone()
     await assertSucceeds(signup(profile(), false))
+  })
+
+  it('비밀번호 변경 필요 표시 없이 가입할 수 없다', async () => {
+    await markSetupDone()
+    await assertFails(signup(profile({ mustChangePassword: false }), false))
+    const { mustChangePassword: _, ...noFlag } = profile()
+    await assertFails(signup(noFlag, false))
   })
 
   it('스스로 사용 가능한 상태로 가입할 수 없다', async () => {

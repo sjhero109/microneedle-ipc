@@ -31,7 +31,7 @@ import {
 import { firebaseConfig } from '../firebase.config'
 import type { Backend, Collection } from './backend'
 import type { Actor, DbState, UserProfile } from './types'
-import { MAX_LOGIN_FAILS } from './types'
+import { MAX_LOGIN_FAILS, RESET_PASSWORD } from './types'
 
 const EMULATOR = import.meta.env.VITE_EMULATOR === '1'
 const EMULATOR_CONFIG: FirebaseOptions = { projectId: 'demo-microneedle-ipc', apiKey: 'demo-key', authDomain: 'localhost' }
@@ -113,8 +113,10 @@ export async function signIn(email: string, password: string): Promise<void> {
  * 앱에서 직접 가입한다. 맨 처음 가입한 사람은 관리자가 되고, 그 뒤로는 관리자 승인을 기다린다.
  * 이미 있는 계정이면 그 계정으로 로그인해서 이어 간다.
  */
-export async function signUp(name: string, email: string, password: string): Promise<void> {
+/** 가입할 때 비밀번호는 정하지 않는다. 초기 비밀번호(dw1234)로 만들고 첫 로그인 때 바꾸게 한다 */
+export async function signUp(name: string, email: string): Promise<void> {
   const { auth, fs } = services()
+  const password = RESET_PASSWORD
   const key = await passwordKey(email, password)
   let uid: string
   try {
@@ -135,6 +137,7 @@ export async function signUp(name: string, email: string, password: string): Pro
     role: first ? 'admin' : 'user',
     active: first,
     pending: !first,
+    mustChangePassword: true,
     createdAt: serverTimestamp(),
   })
   if (first) batch.set(doc(fs, 'meta', 'setup'), { uid, at: serverTimestamp() })

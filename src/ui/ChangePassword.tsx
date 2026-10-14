@@ -30,8 +30,8 @@ export function ChangePassword({ forced, onDone }: { forced?: boolean; onDone?()
 
   return (
     <div className="flex flex-col gap-3">
-      {forced && <p className="text-sm text-sub">관리자가 비밀번호를 초기화했습니다. 계속하려면 새 비밀번호를 정하세요.</p>}
-      <Field label={forced ? '지금 비밀번호 (초기화된 비밀번호)' : '지금 비밀번호'}>
+      {forced && <p className="text-sm text-sub">초기 비밀번호로 로그인했습니다. 계속하려면 새 비밀번호를 정하세요.</p>}
+      <Field label={forced ? '지금 비밀번호 (초기 비밀번호)' : '지금 비밀번호'}>
         <Input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} autoFocus />
       </Field>
       <Field label="새 비밀번호 (6자 이상)">

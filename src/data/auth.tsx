@@ -37,7 +37,7 @@ interface AuthState {
   loginDemo(name: string, role: Role): void
   signIn(email: string, password: string): Promise<void>
   /** 가입 신청. 맨 처음 가입한 사람은 관리자가 된다 */
-  signUp(name: string, email: string, password: string): Promise<void>
+  signUp(name: string, email: string): Promise<void>
   /** 오류가 아닌 안내 문구 (가입 신청 접수 등) */
   notice: string
   /** 초기화된 비밀번호로 들어온 경우: 새 비밀번호를 정하기 전에는 쓸 수 없다 */
@@ -216,26 +216,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signUp = useCallback(
-    async (name: string, email: string, password: string) => {
+    async (name: string, email: string) => {
       setError('')
       setNotice('')
       const { auth } = services()
       signingUp.current = true
       try {
         await setPersistence(auth, browserSessionPersistence)
-        await createOwnAccount(name, email, password)
+        await createOwnAccount(name, email)
         explicit.current = true
         signingUp.current = false
         if (auth.currentUser) await enter(auth.currentUser)
       } catch (e) {
         const code = (e as { code?: string }).code ?? ''
         setError(
-          code === 'auth/weak-password'
-            ? '비밀번호는 6자 이상이어야 합니다.'
-            : code === 'auth/invalid-email'
+          code === 'auth/invalid-email'
               ? '이메일 형식이 올바르지 않습니다.'
               : code.startsWith('auth/')
-                ? '이미 가입된 이메일입니다. 비밀번호를 확인하세요.'
+                ? '이미 가입된 이메일입니다. 로그인하거나 관리자에게 비밀번호 초기화를 요청하세요.'
                 : '가입하지 못했습니다. 잠시 후 다시 시도하세요.',
         )
         if (auth.currentUser) await signOut(auth)

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AuthProvider, useAuth } from './data/auth'
 import { useDb, useDbLoaded } from './data/store'
 import type { Role } from './data/types'
+import { RESET_PASSWORD } from './data/types'
 import { AdminTab } from './ui/AdminTab'
 import { BatchBar } from './ui/BatchBar'
 import { CalcTab } from './ui/CalcTab'
@@ -44,7 +45,7 @@ function Login() {
 
   async function submit() {
     setBusy(true)
-    if (joining) await signUp(name.trim(), email.trim(), password)
+    if (joining) await signUp(name.trim(), email.trim())
     else await signIn(email.trim(), password)
     setBusy(false)
   }
@@ -59,18 +60,24 @@ function Login() {
       <Field label="이메일">
         <Input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
       </Field>
-      <Field label={joining ? '비밀번호 (6자 이상)' : '비밀번호'}>
-        <Input type="password" autoComplete={joining ? 'new-password' : 'current-password'} value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-      </Field>
+      {!joining && (
+        <Field label="비밀번호">
+          <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        </Field>
+      )}
       {error && <p className="text-sm text-bad">{error}</p>}
       {notice && <p className="text-sm text-good">{notice}</p>}
-      <Button variant="primary" disabled={!email.trim() || !password || (joining && !name.trim()) || busy} onClick={submit}>
+      <Button variant="primary" disabled={!email.trim() || (joining ? !name.trim() : !password) || busy} onClick={submit}>
         {joining ? '회원가입' : '로그인'}
       </Button>
       <button type="button" className="h-11 text-sm text-accent" onClick={() => setJoining((j) => !j)}>
         {joining ? '로그인으로 돌아가기' : '회원가입'}
       </button>
-      {joining && <p className="text-xs text-sub">가입한 뒤 관리자가 승인하면 사용할 수 있습니다.</p>}
+      {joining && (
+        <p className="text-xs text-sub">
+          초기 비밀번호는 <b>{RESET_PASSWORD}</b>입니다. 관리자가 승인한 뒤 이 비밀번호로 처음 로그인하면 새 비밀번호를 정합니다.
+        </p>
+      )}
     </main>
   )
 }
