@@ -190,7 +190,26 @@ export const RESET_PASSWORD = 'dw1234'
 
 export const roleLabel = (role: Role | 'none') => (role === 'admin' ? '관리자' : role === 'user' ? '일반 사용자' : '로그인 전')
 
+/** 관리자가 정하는 앱 설정. settings/app 문서 하나에 둔다 */
+export interface AppSettings {
+  id: string
+  /** 조작이 없을 때 자동으로 로그아웃하기까지의 시간(분) */
+  idleMinutes: number
+  updatedAt: number
+  updatedBy: string
+  updatedByName: string
+}
+
+export const IDLE_DEFAULT = 15
+export const IDLE_MIN = 5
+export const IDLE_MAX = 720
+
+export function idleMinutesOf(db: Pick<DbState, 'settings'>): number {
+  return db.settings.find((s) => s.id === 'app')?.idleMinutes ?? IDLE_DEFAULT
+}
+
 export interface DbState {
+  settings: AppSettings[]
   recipes: Recipe[]
   batches: Batch[]
   records: IpcRecord[]

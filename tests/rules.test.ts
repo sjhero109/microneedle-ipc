@@ -429,6 +429,24 @@ describe('잠긴 관리자의 복구', () => {
   })
 })
 
+describe('앱 설정', () => {
+  const idle = (who: Who, minutes: unknown) => ({ idleMinutes: minutes, updatedAt: serverTimestamp(), updatedBy: who === 'admin' ? 'admin1' : 'user1', updatedByName: '이름' })
+
+  it('자동 로그아웃 시간은 관리자만 범위 안에서 정한다', async () => {
+    await assertSucceeds(withAudit('admin', 'settings/app', idle('admin', 30)))
+    await assertFails(withAudit('user', 'settings/app', idle('user', 30)))
+    await assertFails(withAudit('admin', 'settings/app', idle('admin', 1)))
+    await assertFails(withAudit('admin', 'settings/app', idle('admin', 1000)))
+    await assertFails(withAudit('admin', 'settings/app', idle('admin', 30.5)))
+    await assertFails(withAudit('admin', 'settings/other', idle('admin', 30)))
+  })
+
+  it('설정은 사용자 누구나 읽는다', async () => {
+    await assertSucceeds(withAudit('admin', 'settings/app', idle('admin', 30)))
+    await assertSucceeds(getDoc(doc(as('user'), 'settings', 'app')))
+  })
+})
+
 describe('배치 완료', () => {
   const close = { status: 'closed', closedAt: serverTimestamp(), closedBy: 'user1', closedByName: '작업자' }
   const seedClosed = () =>

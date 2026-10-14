@@ -17,12 +17,12 @@ import {
   signUp as createOwnAccount,
   verifyPassword,
 } from './firebase'
-import { clearBackend, logEvent, setBackend } from './store'
+import { clearBackend, logEvent, pendingCount, setBackend, useDb } from './store'
+import { idleMinutesOf } from './types'
 import type { Actor, Role } from './types'
 import { MAX_LOGIN_FAILS } from './types'
 
 /** 이 시간 동안 입력이 없으면 자동으로 로그아웃한다 */
-const IDLE_MS = 15 * 60 * 1000
 const LOCKED_ADMIN_MESSAGE = `로그인 ${MAX_LOGIN_FAILS}회 실패로 관리자 계정이 잠겼습니다. 가입한 이메일로 보낸 메일에서 새 비밀번호를 정한 뒤 로그인하면 잠금이 풀립니다.`
 const LOCKED_MESSAGE = `로그인 ${MAX_LOGIN_FAILS}회 실패로 계정이 잠겼습니다. 관리자에게 잠금 해제를 요청하세요.`
 /** 로그아웃 기록이 저장되기를 기다리는 최대 시간 */
@@ -277,12 +277,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [actor],
   )
 
+  // 자동 로그아웃 시간은 관리자가 설정 탭에서 정한다
+  const idleMs = idleMinutesOf(useDb()) * 60 * 1000
+  // 서버에 아직 올라가지 않은 저장이 있으면 창을 닫거나 새로고침할 때 브라우저가 경고한다
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (pendingCount() === 0) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [])
+
   useEffect(() => {
     if (!actor) return
-    let timer = setTimeout(() => void leave('자동 로그아웃'), IDLE_MS)
+    // 서버에 아직 올라가지 않은 저장이 있으면 로그아웃하지 않고 1분 뒤에 다시 확인한다
+    const expire = () => {
+      if (pendingCount() > 0) timer = setTimeout(expire, 60 * 1000)
+      else void leave('자동 로그아웃')
+    }
+    let timer = setTimeout(expire, idleMs)
     const reset = () => {
       clearTimeout(timer)
-      timer = setTimeout(() => void leave('자동 로그아웃'), IDLE_MS)
+      timer = setTimeout(expire, idleMs)
     }
     window.addEventListener('pointerdown', reset)
     window.addEventListener('keydown', reset)
@@ -291,7 +309,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('pointerdown', reset)
       window.removeEventListener('keydown', reset)
     }
-  }, [actor, leave])
+  }, [actor, leave, idleMs])
 
   const confirm = useCallback(() => {
     if (!firebaseEnabled) return Promise.resolve()

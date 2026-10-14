@@ -47,6 +47,7 @@ function seed(): DbState {
     audit: [],
     users: [],
     guards: [],
+    settings: [],
   }
 }
 

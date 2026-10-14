@@ -180,6 +180,19 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 관리자가 정하는 앱 설정 (자동 로그아웃 시간)
+    match /settings/{id} {
+      allow read: if active();
+      allow create, update: if admin() && audited() && id == 'app'
+        && request.resource.data.keys().hasOnly(['idleMinutes', 'updatedAt', 'updatedBy', 'updatedByName', 'auditId'])
+        && request.resource.data.idleMinutes is int
+        && request.resource.data.idleMinutes >= 5
+        && request.resource.data.idleMinutes <= 720
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
     match /recipes/{id} {
       allow read: if active();
       allow create, update: if admin() && audited() && request.resource.data.updatedAt == request.time;

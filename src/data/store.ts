@@ -4,9 +4,9 @@ import { localBackend, newId, type AuditDraft, type Backend, type Write } from '
 import { firebaseEnabled } from './firebase'
 import { batchRecords, dispenserView, evaluate } from './model'
 import type { Actor, Batch, Correction, DbState, DispenserId, IpcRecord, Recipe, UserProfile } from './types'
-import { CONTENT_MAX, CONTENT_MIN, DISPENSERS, adjustOf, adjustRange, baseTargetOf, contentOf, materialOf, shotsOf, targetForContent, targetOf } from './types'
+import { CONTENT_MAX, CONTENT_MIN, DISPENSERS, IDLE_MAX, IDLE_MIN, adjustOf, adjustRange, idleMinutesOf, baseTargetOf, contentOf, materialOf, shotsOf, targetForContent, targetOf } from './types'
 
-const EMPTY: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [] }
+const EMPTY: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [], settings: [] }
 
 let backend: Backend | null = null
 let state: DbState = EMPTY
@@ -23,6 +23,8 @@ function emit(s: DbState, isLoaded = true) {
 
 /** 저장소를 바꿔 끼운다 (Firebase 로그인 후 사용) */
 export function setBackend(b: Backend) {
+  generation++
+  setPending(0)
   unsubscribe()
   backend = b
   unsubscribe = b.subscribe((s) => emit(s))
@@ -30,6 +32,8 @@ export function setBackend(b: Backend) {
 
 /** 로그아웃하면 화면에 남은 데이터도 비운다 */
 export function clearBackend() {
+  generation++
+  setPending(0)
   unsubscribe()
   unsubscribe = () => {}
   backend = null
@@ -38,9 +42,42 @@ export function clearBackend() {
 
 if (!firebaseEnabled) setBackend(localBackend())
 
+/**
+ * 서버가 아직 받지 않은 저장 건수. 인터넷이 끊기면 저장은 이 창의 메모리에만 있다가 다시 연결될 때 올라가므로,
+ * 이 값이 0이 아닌 동안에는 창을 닫거나 로그아웃하면 기록을 잃을 수 있다
+ */
+let pending = 0
+let generation = 0
+const pendingListeners = new Set<() => void>()
+function setPending(n: number) {
+  pending = n
+  pendingListeners.forEach((l) => l())
+}
+
+export function pendingCount(): number {
+  return pending
+}
+
+export function usePending(): number {
+  return useSyncExternalStore(
+    (l) => {
+      pendingListeners.add(l)
+      return () => pendingListeners.delete(l)
+    },
+    () => pending,
+  )
+}
+
 async function commit(writes: Write[], entries: AuditDraft[]) {
   if (!backend) throw new Error('로그인이 필요합니다.')
-  return backend.commit(writes, entries)
+  // 로그아웃 뒤에 끝난 저장이 다음 로그인의 대기 건수를 건드리지 않게 한다
+  const gen = generation
+  setPending(pending + 1)
+  try {
+    return await backend.commit(writes, entries)
+  } finally {
+    if (gen === generation) setPending(Math.max(0, pending - 1))
+  }
 }
 
 export function useDb(): DbState {
@@ -173,6 +210,16 @@ export async function updateBatch(
   if (Object.keys(changed).length === 0) return
   const prev = Object.fromEntries(Object.keys(changed).map((k) => [k, current[k as keyof Batch]]))
   await commit([{ col: 'batches', id, data: changed }], [audit(actor, '배치 정보 변경', 'batches', id, { before: prev, after: changed })])
+}
+
+/** 자동 로그아웃까지의 시간(분)을 정한다. 모든 사용자에게 적용된다 */
+export async function saveIdleMinutes(actor: Actor, minutes: number) {
+  requireAdmin(actor)
+  if (!Number.isInteger(minutes) || minutes < IDLE_MIN || minutes > IDLE_MAX) throw new Error(`자동 로그아웃 시간은 ${IDLE_MIN}~${IDLE_MAX}분 사이의 정수로 입력하세요.`)
+  const before = idleMinutesOf(state)
+  if (before === minutes) return
+  const data = { idleMinutes: minutes, updatedAt: Date.now(), updatedBy: actor.uid, updatedByName: actor.name }
+  await commit([{ col: 'settings', id: 'app', data }], [audit(actor, '자동 로그아웃 시간 변경', 'settings', 'app', { before: { idleMinutes: before }, after: { idleMinutes: minutes } })])
 }
 
 /** 배치의 테스트 모드를 켜고 끈다. 모든 사용자에게 같은 상태로 보인다 */

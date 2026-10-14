@@ -308,6 +308,7 @@ export async function adminResetPassword(target: { uid: string; email: string },
 }
 
 const COLLECTIONS: Record<keyof DbState, string> = {
+  settings: 'settings',
   recipes: 'recipes',
   batches: 'batches',
   records: 'records',
@@ -330,7 +331,7 @@ export function firebaseBackend(actor: Actor): Backend {
   const { fs } = services()
   return {
     subscribe(cb) {
-      let state: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [] }
+      let state: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [], settings: [] }
       // 모든 컬렉션의 첫 응답이 온 뒤에 화면에 넘긴다
       const waiting = new Set<keyof DbState>()
       const stops = (Object.keys(COLLECTIONS) as (keyof DbState)[]).map((key) => {

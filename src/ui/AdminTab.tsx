@@ -2,18 +2,19 @@ import { useState } from 'react'
 import { useActor, useAuth } from '../data/auth'
 import { adminResetPassword, createAccount, firebaseEnabled, sendPasswordReset } from '../data/firebase'
 import { exportWorkbook, parseImport, type ParsedSheet } from '../data/excel'
-import { importRecords, logEvent, logAdminAction, markPasswordReset, reviewCorrection, saveRecipe, saveUser, setExcluded, startBatch, unlockAccount, useDb, type RecipeInput } from '../data/store'
+import { importRecords, logEvent, saveIdleMinutes, logAdminAction, markPasswordReset, reviewCorrection, saveRecipe, saveUser, setExcluded, startBatch, unlockAccount, useDb, type RecipeInput } from '../data/store'
 import type { Recipe, Role, UserProfile } from '../data/types'
-import { CORRECTION_LABEL, DEFAULT_CRITERIA, RESET_PASSWORD, paramName, roleLabel } from '../data/types'
+import { CORRECTION_LABEL, DEFAULT_CRITERIA, IDLE_MAX, IDLE_MIN, RESET_PASSWORD, idleMinutesOf, paramName, roleLabel } from '../data/types'
 import { Button, Deviation, Field, Input, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
-type Section = 'recipes' | 'import' | 'review' | 'audit' | 'users'
+type Section = 'recipes' | 'import' | 'review' | 'audit' | 'users' | 'settings'
 const SECTIONS: [Section, string][] = [
   ['recipes', '레시피'],
   ['import', '데이터 가져오기'],
   ['review', '정정·이상치 검토'],
   ['audit', 'Audit trail'],
   ['users', '사용자'],
+  ['settings', '설정'],
 ]
 
 const BLANK: RecipeInput = {
@@ -579,6 +580,54 @@ function Users() {
   )
 }
 
+function Settings() {
+  const db = useDb()
+  const actor = useActor()
+  const { confirm } = useAuth()
+  const current = idleMinutesOf(db)
+  const meta = db.settings.find((s) => s.id === 'app')
+  const [value, setValue] = useState(String(current))
+  const [error, setError] = useState('')
+  const [msg, setMsg] = useState('')
+  const n = parseNum(value)
+  return (
+    <div className="flex max-w-xl flex-col gap-3">
+      <h3 className="font-semibold">자동 로그아웃</h3>
+      <p className="text-sm text-sub">
+        화면을 누르거나 키를 입력하지 않은 채 이 시간이 지나면 자동으로 로그아웃합니다. 모든 사용자에게 적용되며, 이미 로그인한 화면에도 바로 반영됩니다.
+      </p>
+      <div className="flex items-end gap-2">
+        <Field label={`시간 (분, ${IDLE_MIN}~${IDLE_MAX})`} className="w-40">
+          <NumInput value={value} onChange={(e) => setValue(e.target.value)} inputMode="numeric" />
+        </Field>
+        <Button
+          variant="primary"
+          className="h-10"
+          disabled={n === null || n === current}
+          onClick={async () => {
+            setError('')
+            setMsg('')
+            try {
+              await confirm()
+              await saveIdleMinutes(actor, n!)
+              setMsg(`자동 로그아웃 시간을 ${n}분으로 바꿨습니다.`)
+            } catch (e) {
+              setError(e instanceof Error ? e.message : '저장하지 못했습니다.')
+            }
+          }}
+        >
+          저장
+        </Button>
+      </div>
+      <p className="text-xs text-sub">
+        현재 {current}분{meta ? ` · ${meta.updatedByName} · ${dateTime(meta.updatedAt)} 변경` : ' (기본값)'}
+      </p>
+      {error && <p className="text-sm text-bad">{error}</p>}
+      {msg && <p className="text-sm text-good">{msg}</p>}
+    </div>
+  )
+}
+
 export function AdminTab() {
   const [section, setSection] = useState<Section>('recipes')
   return (
@@ -601,6 +650,7 @@ export function AdminTab() {
         {section === 'review' && <Review />}
         {section === 'audit' && <Audit />}
         {section === 'users' && <Users />}
+        {section === 'settings' && <Settings />}
       </Panel>
     </div>
   )
