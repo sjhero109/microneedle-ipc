@@ -32,11 +32,9 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const lastUsed = saved.records.filter((r) => !unused(r)).at(-1)
 
   const [tray, setTray] = useState(() => (last ? String(last.tray) : '1'))
-  // Pulse 입력란에는 추천값을 미리 넣어 둔다. 직전 IPC가 적합이면 조정하지 않으므로 쓰던 Pulse를 그대로 둔다
+  // Pulse 입력란에는 추천값을 미리 넣어 둔다. 적합 범위 안이어도 IPC마다 조정 목표를 따라가도록 조정한다
   const [pulse, setPulse] = useState(() => {
     const r = saved.recommendation
-    // 목표 중량이 바뀐 뒤라면 직전 IPC가 적합이었어도 새 목표에 맞춘 추천값을 넣는다
-    if (lastUsed) return String((lastUsed.pass && lastUsed.target === saved.target) || !r ? lastUsed.pulse : r.pulse)
     return r ? String(r.pulse) : last ? String(last.pulse) : ''
   })
   const [total, setTotal] = useState('')
@@ -101,8 +99,8 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
     try {
       await addRecord(actor, batch.id, dispenser.id, { tray: t, pulse: p, totalWeight: w, phase, test: testMode })
       setTotal('')
-      // 부적합이면 다음 IPC를 위해 추천 Pulse를 입력란에 넣어 둔다
-      if (!testMode && verdict && !verdict.pass && rec) setPulse(String(rec.pulse))
+      // 적합이든 부적합이든 다음 IPC를 위해 추천 Pulse를 입력란에 넣어 둔다
+      if (!testMode && rec) setPulse(String(rec.pulse))
     } catch (e) {
       setError(e instanceof Error ? e.message : '저장하지 못했습니다.')
     } finally {
@@ -222,6 +220,11 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                 <span className="font-semibold text-bad">✕ 부적합{testMode ? '' : ` – ${param} 조정 후 재IPC`}</span>
               )}
               {step && <span className="num text-xs text-sub">이번 IPC 반영 {fmt(step.gain * 100, 0)}%</span>}
+              {!testMode && rec && !step?.outlier && (
+                <span className="num basis-full text-xs">
+                  저장하면 다음 {param}는 <b>{rec.pulse}</b> ({signed(rec.delta, 3)})로 조정 목표 {adjustPct}%에 맞춥니다.
+                </span>
+              )}
             </div>
           </div>
         )}
