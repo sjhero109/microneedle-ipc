@@ -49,8 +49,10 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const p = parseNum(pulse)
   const w = parseNum(total)
   const valid = t !== null && t >= 0 && p !== null && p > 0 && w !== null && w > 0
-  // 토출 개시 전 IPC는 1번 트레이에서 한다. 따로 고르지 않고 트레이번호로만 구분한다
-  const phase: Phase = t === 1 ? 'startup' : 'routine'
+  // 토출 개시 전 IPC는 1번 트레이에서 한다. 따로 고르지 않고 트레이번호로만 구분한다.
+  // 0번은 생산 전 세팅 때 트레이 없이 측정한 값이다
+  const noTray = t === 0
+  const phase: Phase = t === 0 || t === 1 ? 'startup' : 'routine'
   const draft: IpcPoint | undefined = valid ? { tray: t, pulse: p, weight: w / saved.shots, shots: saved.shots, phase } : undefined
   // 테스트 값은 모델에 얹지 않으므로 추천과 추정 수준이 움직이지 않는다
   const view = draft && !testMode ? dispenserView(db, batch, dispenser.id, draft) : saved
@@ -184,6 +186,8 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
           {testMode ? '테스트 저장' : '저장'}
         </Button>
         {testMode && <p className="rounded-lg bg-warn/15 px-3 py-2 text-xs">테스트 중 – 이 값은 기록만 남고 추천 {param} 계산에 반영되지 않습니다.</p>}
+        <p className="text-xs text-sub">트레이번호 0 = 생산 전 세팅 (트레이 없이 측정)</p>
+        {noTray && <p className="rounded-lg bg-sunken px-3 py-2 text-xs">생산 전 세팅 – 트레이 없이 측정한 값으로 저장합니다.</p>}
         {trayBack && <p className="text-xs text-bad">트레이번호가 직전 기록({last.tray})보다 작습니다.</p>}
         {error && <p className="text-xs text-bad">{error}</p>}
 
@@ -211,7 +215,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
               {step?.outlier ? (
                 <span className="font-semibold text-bad">⚠ 재측정 권장 – 예상 범위를 크게 벗어난 값입니다</span>
               ) : verdict.pass ? (
-                <span className="font-semibold text-good">✓ 적합{testMode ? '' : ` – ${phase === 'startup' ? '토출 시작 가능' : '토출 지속'}`}</span>
+                <span className="font-semibold text-good">✓ 적합{testMode ? '' : ` – ${noTray ? '세팅 적합' : phase === 'startup' ? '토출 시작 가능' : '토출 지속'}`}</span>
               ) : (
                 <span className="font-semibold text-bad">✕ 부적합{testMode ? '' : ` – ${param} 조정 후 재IPC`}</span>
               )}

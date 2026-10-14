@@ -309,7 +309,7 @@ export async function importRecords(
     }
     const next = (seq.get(row.dispenserId) ?? batchRecords(state, batchId, row.dispenserId).at(-1)?.seq ?? 0) + 1
     seq.set(row.dispenserId, next)
-    const rec = buildRecord(working, actor, batch, row.dispenserId, { ...row, phase: row.tray === 1 ? 'startup' : 'routine' }, next, {
+    const rec = buildRecord(working, actor, batch, row.dispenserId, { ...row, phase: row.tray === 0 || row.tray === 1 ? 'startup' : 'routine' }, next, {
       source: 'import',
       importFile: file,
     })
