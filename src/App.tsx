@@ -7,6 +7,7 @@ import { AdminTab } from './ui/AdminTab'
 import { BatchBar } from './ui/BatchBar'
 import { CalcTab } from './ui/CalcTab'
 import { ChangePassword } from './ui/ChangePassword'
+import { NotificationBell } from './ui/Notifications'
 import { Button, Field, Input, Modal } from './ui/common'
 import { HistoryTab } from './ui/HistoryTab'
 import { LogicTab } from './ui/LogicTab'
@@ -170,7 +171,9 @@ function Shell() {
     ['logic', '계산 로직'],
     ['history', '결과'],
   ]
-  if (actor.role === 'admin') tabs.push(['admin', '관리자'])
+  // 승인을 기다리는 정정 요청이 있으면 관리자 탭에 건수를 표시한다
+  const pendingCorrections = db.corrections.filter((c) => c.status === 'pending').length
+  if (actor.role === 'admin') tabs.push(['admin', pendingCorrections ? `관리자 · 정정 대기 ${pendingCorrections}` : '관리자'])
 
   return (
     <div className="mx-auto flex min-h-screen max-w-[1500px] flex-col gap-3 px-3 pt-3 pb-6 sm:px-4">
@@ -179,6 +182,7 @@ function Shell() {
         <div className="mb-3 flex items-center justify-between gap-3">
           <h1 className="text-lg font-bold whitespace-nowrap">마이크로니들 IPC</h1>
           <div className="flex items-center gap-2 text-sm">
+            <NotificationBell />
             <span className="text-right leading-tight whitespace-nowrap">
               <span className="block font-medium">{actor.name}</span>
               <span className="block text-xs text-sub">{actor.role === 'admin' ? '관리자' : '일반 사용자'}</span>

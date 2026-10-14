@@ -629,7 +629,10 @@ function Settings() {
 }
 
 export function AdminTab() {
-  const [section, setSection] = useState<Section>('recipes')
+  const db = useDb()
+  const waiting = db.corrections.filter((c) => c.status === 'pending').length
+  // 승인 대기 정정이 있으면 바로 검토 화면을 연다
+  const [section, setSection] = useState<Section>(waiting ? 'review' : 'recipes')
   return (
     <div className="flex flex-col gap-3">
       <div className="flex gap-1 overflow-x-auto">
@@ -641,6 +644,7 @@ export function AdminTab() {
             className={`h-10 rounded-lg px-3 text-sm font-medium whitespace-nowrap ${section === id ? 'bg-ink text-panel' : 'text-sub hover:bg-sunken'}`}
           >
             {label}
+            {id === 'review' && waiting > 0 && <span className="ml-1.5 rounded-full bg-bad px-1.5 text-xs text-white">{waiting}</span>}
           </button>
         ))}
       </div>

@@ -3,7 +3,7 @@ import { useActor, useAuth } from '../data/auth'
 import { exportWorkbook } from '../data/excel'
 import { dispenserView, trayLabels, unused } from '../data/model'
 import { classify } from '../engine'
-import { correctDirectly, includeTestRecords, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
+import { correctDirectly, includeTestRecords, reviewCorrection, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
 import { CORRECTION_LABEL, DISPENSERS, adjustOf, paramName, roleLabel, targetOf } from '../data/types'
 import { TrendChart } from './TrendChart'
@@ -20,6 +20,7 @@ export function RecordDetail({ record, onClose }: { record: IpcRecord; onClose()
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
   const [exReason, setExReason] = useState('')
+  const [reviewNote, setReviewNote] = useState('')
   const { confirm } = useAuth()
   const [error, setError] = useState('')
   const corrections = db.corrections.filter((c) => c.recordId === record.id)
@@ -162,6 +163,19 @@ export function RecordDetail({ record, onClose }: { record: IpcRecord; onClose()
                   {c.requestedByName} · {dateTime(c.requestedAt)} · {c.reason}
                   {c.reviewedByName && ` / 검토 ${c.reviewedByName} · ${c.reviewNote ?? ''}`}
                 </div>
+                {/* 관리자는 기록 상세에서 바로 승인·반려한다 (관리자 탭의 정정·이상치 검토와 같다) */}
+                {actor.role === 'admin' && c.status === 'pending' && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Input className="!h-10 min-w-40 flex-1" placeholder="검토 의견" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} />
+                    <Button variant="primary" className="h-10" onClick={() => run(async () => (await confirm(), await reviewCorrection(actor, c.id, true, reviewNote), setReviewNote('')))}>
+                      승인
+                    </Button>
+                    <Button className="h-10" onClick={() => run(async () => (await confirm(), await reviewCorrection(actor, c.id, false, reviewNote), setReviewNote('')))}>
+                      반려
+                    </Button>
+                  </div>
+                )}
+                {actor.role !== 'admin' && c.status === 'pending' && <div className="mt-1 text-xs text-sub">관리자가 승인하면 반영됩니다.</div>}
               </li>
             ))}
           </ul>
