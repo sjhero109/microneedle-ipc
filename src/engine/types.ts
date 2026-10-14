@@ -55,7 +55,7 @@ export interface FilterStep {
 }
 
 export interface EngineOptions {
-  /** 새 배치 시작 시 P0 = R × p0Factor */
+  /** 새 배치 시작 시 P0 = R × p0Factor. 새 배치의 수준은 사실상 모른다고 보고, 첫 IPC를 거의 그대로 받아들인다 */
   p0Factor: number
   /** 이상치 후보 판정 기준 (σ 배수) */
   outlierSigma: number
@@ -67,7 +67,7 @@ export interface EngineOptions {
 }
 
 export const DEFAULT_OPTIONS: EngineOptions = {
-  p0Factor: 4,
+  p0Factor: 1e4,
   outlierSigma: 3,
   bRelMin: 0.02,
   bRelMax: 3,

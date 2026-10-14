@@ -115,6 +115,16 @@ describe('새 배치', () => {
     expect(Math.abs(f(1, high.pulse) / (7.5 * 1.03) - 1)).toBeLessThan(0.03)
   })
 
+  it('과거 Pulse 범위 밖에서 시작해도 첫 IPC를 출발점으로 삼는다', () => {
+    // 과거는 Pulse 3 근처, 이번 배치는 Pulse 5.2에서 1회 토출. 과거 기울기로 늘려 잡으면 8 mg대가 예상되지만 실제는 6.18 mg
+    const m = buildBatchModel(prior, [{ tray: 1, pulse: 5.2, weight: 6.18, shots: 1 }])
+    expect(Math.abs(m.steps[0].levelAtPulse - 6.18)).toBeLessThan(0.01)
+    const r = recommend({ params: m.params, state: m.state, pulseNow: 5.2, target: 5.864, adjustPct: 103, trayInterval: 0, pulseStep: 0.001 })
+    // 6.18 mg는 103%(6.04 mg)보다 조금 높을 뿐이므로 Pulse도 조금만 내린다
+    expect(r.pulse).toBeLessThan(5.2)
+    expect(r.pulse).toBeGreaterThan(5.0)
+  })
+
   it('이상치 한 건에 끌려가지 않는다', () => {
     const f = plant({ level: 6, b: 1.2 })
     const pts = Array.from({ length: 8 }, (_, i) => ({ tray: i + 1, pulse: 3, weight: f(i + 1, 3) }))
