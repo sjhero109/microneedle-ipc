@@ -243,6 +243,9 @@ export function contentOf(batch: Batch, recipe?: Pick<Recipe, 'drugTarget'>): nu
 /** 토출기 파라미터의 이름: 약액부는 Pulse, 기저부는 Speed. 저장 필드 이름은 둘 다 pulse 를 쓴다 */
 export const paramName = (type: MaterialType) => (type === 'drug' ? 'Pulse' : 'Speed')
 
+/** Pulse·Speed의 단위 */
+export const PARAM_UNIT = 'm/s'
+
 export const DEFAULT_CRITERIA: Criteria = {
   bands: [2, 5, 10],
   bandCenterPct: 100,

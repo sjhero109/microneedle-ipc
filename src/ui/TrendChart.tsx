@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Band } from '../engine'
+import { PARAM_UNIT } from '../data/types'
 import { BAND_LABEL, fmt, signed } from './common'
 
 export interface TrendPoint {
@@ -192,7 +193,7 @@ export function TrendChart({
             </div>
           )}
           <div className="num">
-            {paramLabel} {h.pulse}
+            {paramLabel} {h.pulse} {PARAM_UNIT}
           </div>
           {h.test ? <div>테스트 기록 (계산에 미반영)</div> : h.excluded && <div>계산에서 제외됨</div>}
         </div>

@@ -3,7 +3,7 @@ import { useActor } from '../data/auth'
 import { dispenserView, evaluate, trayLabels, unused } from '../data/model'
 import { addRecord, useDb } from '../data/store'
 import type { Batch, DispenserId, MaterialType } from '../data/types'
-import { adjustOf, materialOf, paramName } from '../data/types'
+import { PARAM_UNIT, adjustOf, materialOf, paramName } from '../data/types'
 import type { IpcPoint, Phase } from '../engine'
 import { Button, Deviation, Field, NumInput, fmt, parseNum, signed, timeOnly } from './common'
 import { TrendChart, type TrendPoint } from './TrendChart'
@@ -149,15 +149,20 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         {rec && view.pulseNow !== null ? (
           <>
             <div className="mt-1 flex items-end justify-between gap-3">
-              <span className="num text-4xl leading-none font-bold tracking-tight">{rec.pulse}</span>
+              <span className="num text-4xl leading-none font-bold tracking-tight">
+                {rec.pulse}
+                <span className="ml-1.5 text-base font-semibold text-sub">{PARAM_UNIT}</span>
+              </span>
               <Button variant="primary" onClick={() => setPulse(String(rec.pulse))} className="h-10 px-3 text-sm" disabled={String(rec.pulse) === pulse}>
                 {param}에 적용
               </Button>
             </div>
             <div className="num mt-2 text-sm">
-              {view.usedCount > 0 ? '현재' : '기준'} {param} {view.pulseNow}
+              {view.usedCount > 0 ? '현재' : '기준'} {param} {view.pulseNow} {PARAM_UNIT}
               <span className="mx-1 text-sub">대비</span>
-              <span className="font-semibold">{signed(rec.delta, 3)}</span>
+              <span className="font-semibold">
+                {signed(rec.delta, 3)} {PARAM_UNIT}
+              </span>
               <span className="ml-2 text-sub">
                 (지금 추정 {fmt(rec.expectedNow, 3)} mg, {signed((rec.expectedNow / saved.target - 1) * 100)}%)
               </span>
@@ -179,7 +184,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
           <Field label="트레이번호">
             <NumInput value={tray} onChange={(e) => setTray(e.target.value)} inputMode="numeric" />
           </Field>
-          <Field label={rec && String(rec.pulse) === pulse ? `${param} (추천값)` : param}>
+          <Field label={rec && String(rec.pulse) === pulse ? `${param} (${PARAM_UNIT}, 추천값)` : `${param} (${PARAM_UNIT})`}>
             <NumInput value={pulse} onChange={(e) => setPulse(e.target.value)} />
           </Field>
           <Field label={saved.shots > 1 ? `${saved.shots}회 합계 (mg)` : '중량 (mg)'}>
@@ -227,7 +232,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
               {step && <span className="num text-xs text-sub">이번 IPC 반영 {fmt(step.gain * 100, 0)}%</span>}
               {!testMode && rec && !step?.outlier && (
                 <span className="num basis-full text-xs">
-                  저장하면 다음 {param}는 <b>{rec.pulse}</b> ({signed(rec.delta, 3)})로 조정 목표 {adjustPct}%에 맞춥니다.
+                  저장하면 다음 {param}는 <b>{rec.pulse} {PARAM_UNIT}</b> ({signed(rec.delta, 3)})로 조정 목표 {adjustPct}%에 맞춥니다.
                 </span>
               )}
             </div>
@@ -243,7 +248,9 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                 <tr className="border-b border-line text-left text-xs text-sub">
                   <th className="py-1 font-medium">#</th>
                   <th className="py-1 font-medium">트레이</th>
-                  <th className="py-1 font-medium">{param}</th>
+                  <th className="py-1 font-medium">
+                    {param} ({PARAM_UNIT})
+                  </th>
                   <th className="py-1 text-right font-medium">중량</th>
                   <th className="py-1 text-right font-medium">편차</th>
                   <th className="py-1 text-right font-medium">판정</th>
