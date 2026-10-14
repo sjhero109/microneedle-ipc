@@ -41,17 +41,22 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       ['제조일자', batch.mfgDate],
       ['약액부명', batch.drugName || '–'],
       ['기저부명', batch.baseName || '–'],
-      ['약액부 함량 → 목표 중량', `${contentOf(batch, batchRecipe)}% → ${fmt(batch.drugTarget, 3)} mg`],
-      ['약액부 IPC 배수', `같은 Pulse로 ${batch.shots}회 (${fmt(batch.drugTarget * batch.shots, 2)} mg)`],
-      ['조정 목표 (약액부 / 기저부)', `${adjustOf(batch, 'drug')}% / ${adjustOf(batch, 'base')}%`],
+      ['약액부 함량', `${contentOf(batch, batchRecipe)}%`],
+      ['약액부 목표 중량', `${fmt(batch.drugTarget, 3)} mg`],
+      ['약액부 IPC 배수', batch.shots > 1 ? `${batch.shots}회 (${fmt(batch.drugTarget * batch.shots, 2)} mg)` : '1회'],
+      ['약액부 조정 목표', `${adjustOf(batch, 'drug')}%`],
+      ['기저부 조정 목표', `${adjustOf(batch, 'base')}%`],
     ]
     return (
       <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-        <dl className="grid min-w-0 flex-1 basis-full grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-3 xl:basis-0 xl:grid-cols-8">
+        {/* 항목마다 이름과 값이 한 줄에 들어가도록 줄바꿈 없이 내용 폭만큼 차지하고, 자리가 모자라면 다음 줄로 넘긴다 */}
+        <dl className="flex min-w-0 flex-1 basis-full flex-wrap gap-x-6 gap-y-2.5 xl:basis-0">
           {items.map(([k, v]) => (
             <div key={k} className="min-w-0">
-              <dt className="text-xs text-sub">{k}</dt>
-              <dd className="num font-semibold break-words">{v}</dd>
+              <dt className="text-xs whitespace-nowrap text-sub">{k}</dt>
+              <dd className="num font-semibold whitespace-nowrap">
+                {v}
+              </dd>
             </div>
           ))}
         </dl>

@@ -23,7 +23,7 @@ export interface TrendPoint {
 
 const W = 340
 const H = 150
-const M = { l: 40, r: 34, t: 8, b: 18 }
+const M = { l: 52, r: 34, t: 8, b: 18 }
 const DOT: Record<Band, string> = { ok: 'var(--ink)', yellow: 'var(--warn)', red: 'var(--bad)', purple: 'var(--severe)' }
 
 /** IPC 순서에 따른 중량 추이. 측정값은 점, 추정 수준은 선으로 그린다 */
@@ -62,6 +62,7 @@ export function TrendChart({
   // 기준선: 목표(100%)와 ±적합 한계, ±10%. 범위 안에 있는 것만 그린다
   const refs = [...new Set([100 + passLow, 100 + passHigh, 90, 110])].filter((v) => v !== 100 && inRange(v))
   const mg = (pct: number) => fmt((target * pct) / 100, target >= 100 ? 1 : 3)
+  const mgLabel = (pct: number) => `${mg(pct)} mg`
   const n = points.length
   const PAD = 8
   const x = (i: number) => M.l + PAD + (n === 1 ? (W - M.l - M.r - 2 * PAD) / 2 : (i * (W - M.l - M.r - 2 * PAD)) / (n - 1))
@@ -100,7 +101,7 @@ export function TrendChart({
             {fits(v, [100, adjustPct, ...refs.filter((o) => o !== v && Math.abs(o - 100) < Math.abs(v - 100))]) && (
               <>
                 <text x={M.l - 4} y={y(v) + 3.5} textAnchor="end" fontSize="9.5" fill="var(--sub)">
-                  {mg(v)}
+                  {mgLabel(v)}
                 </text>
                 <text x={W - M.r + 4} y={y(v) + 3.5} fontSize="9.5" fill="var(--sub)">
                   {signed(v - 100, 0)}%
@@ -112,11 +113,11 @@ export function TrendChart({
         <line x1={M.l} x2={W - M.r} y1={y(100)} y2={y(100)} stroke="var(--sub)" strokeWidth="1" />
         <line x1={M.l} x2={W - M.r} y1={y(adjustPct)} y2={y(adjustPct)} stroke="var(--sub)" strokeWidth="1" strokeDasharray="4 3" />
         <text x={M.l - 4} y={y(100) + 3.5} textAnchor="end" fontSize="9.5" fontWeight="600" fill="var(--ink)">
-          {mg(100)}
+          {mgLabel(100)}
         </text>
         {fits(adjustPct, [100]) && (
           <text x={M.l - 4} y={y(adjustPct) + 3.5} textAnchor="end" fontSize="9.5" fill="var(--sub)">
-            {mg(adjustPct)}
+            {mgLabel(adjustPct)}
           </text>
         )}
         <text x={W - M.r + 4} y={y(adjustPct) + 3.5} fontSize="9.5" fill="var(--sub)">
@@ -124,7 +125,7 @@ export function TrendChart({
         </text>
         {adjustPct !== 100 && fits(100, [adjustPct]) && (
           <text x={W - M.r + 4} y={y(100) + 3.5} fontSize="9.5" fill="var(--sub)">
-            목표
+            100%
           </text>
         )}
 
