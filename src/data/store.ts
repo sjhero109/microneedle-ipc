@@ -338,6 +338,8 @@ export async function requestCorrection(
   const rec = state.records.find((r) => r.id === recordId)
   if (!rec) throw new Error('기록을 찾을 수 없습니다.')
   if (!reason.trim()) throw new Error('정정 사유를 입력하세요.')
+  // 트레이번호 0은 생산 전 세팅(트레이 없이 측정)이다
+  if (field === 'tray' ? newValue < 0 : newValue <= 0) throw new Error(field === 'tray' ? '트레이번호는 0 이상이어야 합니다.' : '0보다 큰 값을 입력하세요.')
   const c: Correction = {
     id: newId(),
     recordId,
@@ -351,6 +353,16 @@ export async function requestCorrection(
     requestedAt: Date.now(),
   }
   await commit([{ col: 'corrections', id: c.id, data: { ...c } }], [audit(actor, '정정 요청', 'corrections', c.id, { after: c, reason })])
+  return c.id
+}
+
+/** 관리자가 요청과 승인을 한 번에 처리한다. audit trail에는 요청과 승인이 모두 남는다 */
+export async function correctDirectly(actor: Actor, recordId: string, field: Correction['field'], newValue: number, reason: string) {
+  requireAdmin(actor)
+  const id = await requestCorrection(actor, recordId, field, newValue, reason)
+  // 방금 저장한 요청이 화면 상태에 들어올 때까지 잠깐 기다린다
+  for (let i = 0; i < 40 && !state.corrections.some((c) => c.id === id); i++) await new Promise((r) => setTimeout(r, 50))
+  await reviewCorrection(actor, id, true, `관리자 직접 정정: ${reason}`)
 }
 
 export async function reviewCorrection(actor: Actor, correctionId: string, approve: boolean, note: string) {

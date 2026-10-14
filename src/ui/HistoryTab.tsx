@@ -3,7 +3,7 @@ import { useActor, useAuth } from '../data/auth'
 import { exportWorkbook } from '../data/excel'
 import { dispenserView, trayLabels, unused } from '../data/model'
 import { classify } from '../engine'
-import { includeTestRecords, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
+import { correctDirectly, includeTestRecords, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
 import { DISPENSERS, paramName, roleLabel, targetOf } from '../data/types'
 import { TrendChart } from './TrendChart'
@@ -101,6 +101,22 @@ function Detail({ record, onClose }: { record: IpcRecord; onClose(): void }) {
       >
         정정 요청
       </Button>
+      {actor.role === 'admin' && (
+        <Button
+          className="mt-2 ml-2"
+          disabled={parseNum(value) === null || !reason.trim()}
+          onClick={() =>
+            run(async () => {
+              await confirm()
+              await correctDirectly(actor, record.id, field, parseNum(value)!, reason)
+              setValue('')
+              setReason('')
+            })
+          }
+        >
+          바로 정정 (관리자)
+        </Button>
+      )}
 
       {actor.role === 'admin' && record.test && (
         <>
