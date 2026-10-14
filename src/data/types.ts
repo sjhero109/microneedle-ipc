@@ -75,6 +75,11 @@ export interface Batch extends Criteria {
   closedAt?: number
   closedBy?: string
   closedByName?: string
+  /** 테스트 모드. 배치에 저장되므로 누가 어느 화면에서 보든 같고, 켜져 있는 동안 저장하는 IPC는 모두 테스트 기록이 된다 */
+  testMode?: boolean
+  testModeBy?: string
+  testModeByName?: string
+  testModeAt?: number
   createdAt: number
   createdBy: string
 }

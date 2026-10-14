@@ -193,10 +193,14 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time;
       // 완료된 배치는 다시 여는 것만 할 수 있다 (작업자도 가능). 연 뒤에야 내용을 고칠 수 있다
       allow update: if active() && audited()
-        && onlyChanges(['drugName', 'baseName', 'shots', 'mfgDate', 'drugTarget', 'contentPct', 'drugTargetBase', 'drugAdjustPct', 'baseAdjustPct', 'status', 'closedAt', 'closedBy', 'closedByName', 'auditId'])
+        && onlyChanges(['drugName', 'baseName', 'shots', 'mfgDate', 'drugTarget', 'contentPct', 'drugTargetBase', 'drugAdjustPct', 'baseAdjustPct', 'testMode', 'testModeBy', 'testModeByName', 'testModeAt', 'status', 'closedAt', 'closedBy', 'closedByName', 'auditId'])
         // 약액부 목표 중량은 함량에 따라 배치 중에도 바뀐다
         && request.resource.data.get('contentPct', 100) is number
         && request.resource.data.get('contentPct', 100) > 0
+        // 테스트 모드는 켠 사람을 속일 수 없다
+        && request.resource.data.get('testMode', false) is bool
+        && (request.resource.data.get('testMode', false) == resource.data.get('testMode', false)
+            || (request.resource.data.testModeBy == request.auth.uid && request.resource.data.testModeAt == request.time))
         // 조정 목표(%)는 배치에서 약액부·기저부를 따로 정할 수 있다
         && request.resource.data.get('drugAdjustPct', 100) is number
         && request.resource.data.get('drugAdjustPct', 100) > 0

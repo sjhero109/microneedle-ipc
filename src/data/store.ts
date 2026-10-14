@@ -175,6 +175,16 @@ export async function updateBatch(
   await commit([{ col: 'batches', id, data: changed }], [audit(actor, '배치 정보 변경', 'batches', id, { before: prev, after: changed })])
 }
 
+/** 배치의 테스트 모드를 켜고 끈다. 모든 사용자에게 같은 상태로 보인다 */
+export async function setTestMode(actor: Actor, id: string, on: boolean) {
+  const batch = state.batches.find((b) => b.id === id)
+  if (!batch) throw new Error('배치를 찾을 수 없습니다.')
+  if (batch.status === 'closed') throw new Error('완료된 배치입니다.')
+  if ((batch.testMode === true) === on) return
+  const data = { testMode: on, testModeBy: actor.uid, testModeByName: actor.name, testModeAt: Date.now() }
+  await commit([{ col: 'batches', id, data }], [audit(actor, on ? '테스트 모드 켜기' : '테스트 모드 끄기', 'batches', id, { before: { testMode: batch.testMode === true }, after: { testMode: on, batchNo: batch.batchNo } })])
+}
+
 /** 공정이 끝난 배치를 닫는다. 닫힌 배치는 불러오거나 기록을 더할 수 없고 결과 탭에서만 본다 */
 export async function closeBatch(actor: Actor, id: string) {
   const batch = state.batches.find((b) => b.id === id)
@@ -271,7 +281,8 @@ export async function addRecord(actor: Actor, batchId: string, dispenserId: Disp
   if (!batch) throw new Error('배치를 찾을 수 없습니다.')
   if (batch.status === 'closed') throw new Error('완료된 배치에는 기록할 수 없습니다.')
   const seq = (batchRecords(state, batchId, dispenserId).at(-1)?.seq ?? 0) + 1
-  const rec = buildRecord(state, actor, batch, dispenserId, input, seq)
+  // 테스트 여부는 화면이 아니라 서버에 저장된 배치의 테스트 모드로 정한다
+  const rec = buildRecord(state, actor, batch, dispenserId, { ...input, test: batch.testMode === true }, seq)
   await commit([{ col: 'records', id: rec.id, data: { ...rec } }], [audit(actor, rec.test ? 'IPC 저장 (테스트)' : 'IPC 저장', 'records', rec.id, { after: rec })])
 }
 
