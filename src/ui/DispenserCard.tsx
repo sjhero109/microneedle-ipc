@@ -72,6 +72,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         label: labels.get(r.id),
         pulse: r.pulse,
         pct: (r.weight / r.target) * 100,
+        weight: r.weight,
         levelPct: s ? (s.levelAtPulse / r.target) * 100 : null,
         band: r.band,
         excluded: unused(r),
@@ -85,6 +86,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         tray: draft.tray,
         pulse: draft.pulse,
         pct: (draft.weight / saved.target) * 100,
+        weight: draft.weight,
         levelPct: s ? (s.levelAtPulse / saved.target) * 100 : null,
         band: verdict.band,
         excluded: testMode,
@@ -232,7 +234,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
           </div>
         )}
 
-        <TrendChart points={points} adjustPct={adjustPct} passLow={batch.passLowPct} passHigh={batch.passHighPct} paramLabel={param} />
+        <TrendChart points={points} target={saved.target} adjustPct={adjustPct} passLow={batch.passLowPct} passHigh={batch.passHighPct} paramLabel={param} />
 
         {saved.records.length > 0 && (
           <div>

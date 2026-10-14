@@ -10,6 +10,8 @@ export interface TrendPoint {
   pulse: number
   /** 측정값(목표 대비 %) */
   pct: number
+  /** 측정값(1회분 mg) */
+  weight?: number
   /** 필터 추정 수준(목표 대비 %) */
   levelPct: number | null
   band: Band
@@ -21,18 +23,21 @@ export interface TrendPoint {
 
 const W = 340
 const H = 150
-const M = { l: 30, r: 34, t: 8, b: 18 }
+const M = { l: 40, r: 34, t: 8, b: 18 }
 const DOT: Record<Band, string> = { ok: 'var(--ink)', yellow: 'var(--warn)', red: 'var(--bad)', purple: 'var(--severe)' }
 
 /** IPC 순서에 따른 중량 추이. 측정값은 점, 추정 수준은 선으로 그린다 */
 export function TrendChart({
   points,
+  target,
   adjustPct,
   passLow,
   passHigh,
   paramLabel = 'Pulse',
 }: {
   points: TrendPoint[]
+  /** 지금의 목표 중량(1회분 mg). 기준선 옆에 중량으로 적는다 */
+  target: number
   adjustPct: number
   passLow: number
   passHigh: number
@@ -42,9 +47,21 @@ export function TrendChart({
   const [hover, setHover] = useState<number | null>(null)
   if (points.length === 0) return null
 
-  const values = points.flatMap((p) => (p.levelPct === null ? [p.pct] : [p.pct, p.levelPct]))
-  const lo = Math.max(40, Math.min(100 + passLow - 3, ...values) - 2)
-  const hi = Math.min(170, Math.max(adjustPct + 5, 100 + passHigh + 3, ...values) + 2)
+  // 세로축은 계산에 쓰는 기록(테스트·제외 빼고)과 목표·조정 목표가 모두 보이는 범위로 확대한다.
+  // 그 밖으로 벗어난 테스트·제외 값은 그리지 않는다
+  const used = points.filter((p) => !p.excluded)
+  const basis = used.length ? used : points
+  const values = [100, adjustPct, ...basis.flatMap((p) => (p.levelPct === null ? [p.pct] : [p.pct, p.levelPct]))]
+  const vMin = Math.min(...values)
+  const vMax = Math.max(...values)
+  const span = Math.max(vMax - vMin, 6)
+  const mid = (vMin + vMax) / 2
+  const lo = mid - span / 2 - span * 0.12
+  const hi = mid + span / 2 + span * 0.12
+  const inRange = (v: number) => v >= lo && v <= hi
+  // 기준선: 목표(100%)와 ±적합 한계, ±10%. 범위 안에 있는 것만 그린다
+  const refs = [...new Set([100 + passLow, 100 + passHigh, 90, 110])].filter((v) => v !== 100 && inRange(v))
+  const mg = (pct: number) => fmt((target * pct) / 100, target >= 100 ? 1 : 3)
   const n = points.length
   const PAD = 8
   const x = (i: number) => M.l + PAD + (n === 1 ? (W - M.l - M.r - 2 * PAD) / 2 : (i * (W - M.l - M.r - 2 * PAD)) / (n - 1))
@@ -54,7 +71,8 @@ export function TrendChart({
     .map((p, i) => (p.levelPct === null || p.excluded ? null : `${x(i).toFixed(1)},${y(p.levelPct).toFixed(1)}`))
     .filter(Boolean)
     .join(' ')
-  const roomy = Math.abs(y(100 + passLow) - y(100)) >= 11 && Math.abs(y(100 + passHigh) - y(100)) >= 11
+  // 글자가 겹치면 기준선 이름을 생략한다 (목표·조정 목표는 항상 적는다)
+  const fits = (v: number, others: number[]) => others.every((o) => Math.abs(y(v) - y(o)) >= 11)
   const h = hover === null ? null : points[hover]
   const tipLeft = hover !== null && x(hover) > W / 2
 
@@ -76,25 +94,37 @@ export function TrendChart({
           setHover(best)
         }}
       >
-        {[100 + passLow, 100 + passHigh].map((v) => (
-          <line key={v} x1={M.l} x2={W - M.r} y1={y(v)} y2={y(v)} stroke="var(--line)" strokeWidth="1" />
+        {refs.map((v) => (
+          <g key={v}>
+            <line x1={M.l} x2={W - M.r} y1={y(v)} y2={y(v)} stroke={v === 100 + passLow || v === 100 + passHigh ? 'var(--bad)' : 'var(--line)'} strokeOpacity={v === 100 + passLow || v === 100 + passHigh ? 0.45 : 1} strokeWidth="1" />
+            {fits(v, [100, adjustPct, ...refs.filter((o) => o !== v && Math.abs(o - 100) < Math.abs(v - 100))]) && (
+              <>
+                <text x={M.l - 4} y={y(v) + 3.5} textAnchor="end" fontSize="9.5" fill="var(--sub)">
+                  {mg(v)}
+                </text>
+                <text x={W - M.r + 4} y={y(v) + 3.5} fontSize="9.5" fill="var(--sub)">
+                  {signed(v - 100, 0)}%
+                </text>
+              </>
+            )}
+          </g>
         ))}
         <line x1={M.l} x2={W - M.r} y1={y(100)} y2={y(100)} stroke="var(--sub)" strokeWidth="1" />
         <line x1={M.l} x2={W - M.r} y1={y(adjustPct)} y2={y(adjustPct)} stroke="var(--sub)" strokeWidth="1" strokeDasharray="4 3" />
-        <text x={M.l - 4} y={y(100) + 3.5} textAnchor="end" fontSize="10" fill="var(--sub)">
-          100
+        <text x={M.l - 4} y={y(100) + 3.5} textAnchor="end" fontSize="9.5" fontWeight="600" fill="var(--ink)">
+          {mg(100)}
         </text>
-        <text x={W - M.r + 4} y={y(adjustPct) + 3.5} fontSize="10" fill="var(--sub)">
-          {adjustPct}%
-        </text>
-        {roomy && (
-          <text x={M.l - 4} y={y(100 + passLow) + 3.5} textAnchor="end" fontSize="10" fill="var(--sub)">
-            {100 + passLow}
+        {fits(adjustPct, [100]) && (
+          <text x={M.l - 4} y={y(adjustPct) + 3.5} textAnchor="end" fontSize="9.5" fill="var(--sub)">
+            {mg(adjustPct)}
           </text>
         )}
-        {roomy && 100 + passHigh !== adjustPct && (
-          <text x={M.l - 4} y={y(100 + passHigh) + 3.5} textAnchor="end" fontSize="10" fill="var(--sub)">
-            {100 + passHigh}
+        <text x={W - M.r + 4} y={y(adjustPct) + 3.5} fontSize="9.5" fill="var(--sub)">
+          {adjustPct}%
+        </text>
+        {adjustPct !== 100 && fits(100, [adjustPct]) && (
+          <text x={W - M.r + 4} y={y(100) + 3.5} fontSize="9.5" fill="var(--sub)">
+            목표
           </text>
         )}
 
@@ -108,7 +138,8 @@ export function TrendChart({
 
         {level && <polyline points={level} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
 
-        {points.map((p, i) => (
+        {points.map((p, i) =>
+          p.excluded && !inRange(p.pct) ? null : (
           <circle
             key={i}
             cx={x(i)}
@@ -120,7 +151,8 @@ export function TrendChart({
             strokeDasharray={p.draft ? '2 2' : undefined}
             opacity={p.excluded ? 0.5 : 1}
           />
-        ))}
+          ),
+        )}
         {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={M.t} y2={H - M.b} stroke="var(--sub)" strokeWidth="1" opacity="0.5" />}
       </svg>
 
@@ -151,9 +183,13 @@ export function TrendChart({
             {h.draft ? '입력 중' : `${h.seq}번째`} · 트레이 {h.label ?? h.tray}
           </div>
           <div className="num">
-            측정 {fmt(h.pct, 1)}% ({signed(h.pct - 100)}%) {BAND_LABEL[h.band]}
+            측정 {h.weight !== undefined ? `${fmt(h.weight, target >= 100 ? 1 : 3)} mg ` : ''}({signed(h.pct - 100)}%) {BAND_LABEL[h.band]}
           </div>
-          {h.levelPct !== null && <div className="num">추정 {fmt(h.levelPct, 1)}%</div>}
+          {h.levelPct !== null && (
+            <div className="num">
+              추정 {mg(h.levelPct)} mg ({signed(h.levelPct - 100)}%)
+            </div>
+          )}
           <div className="num">
             {paramLabel} {h.pulse}
           </div>

@@ -250,11 +250,13 @@ function DispenserResult({ batch, dispenser, records, labels }: { batch: Batch; 
             label: labels.get(r.id),
             pulse: r.pulse,
             pct: (r.weight / r.target) * 100,
+            weight: r.weight,
             levelPct: levels.get(r.id) === undefined ? null : (levels.get(r.id)! / r.target) * 100,
             band: r.band,
             excluded: unused(r),
             test: r.test,
           }))}
+          target={targetOf(batch, dispenser.type)}
           adjustPct={adjustOf(batch, dispenser.type)}
           passLow={batch.passLowPct}
           passHigh={batch.passHighPct}
