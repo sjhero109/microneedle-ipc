@@ -246,7 +246,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
             <table className="num w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs text-sub">
-                  <th className="py-1 font-medium">#</th>
+                  <th className="py-1 pr-2 font-medium">#</th>
                   <th className="py-1 font-medium">트레이</th>
                   <th className="py-1 font-medium">
                     {param} ({PARAM_UNIT})
@@ -265,7 +265,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                     title="눌러서 상세·정정"
                     className={`cursor-pointer border-b border-line/60 hover:bg-sunken ${r.excluded ? 'text-sub line-through' : r.test ? 'text-sub' : ''}`}
                   >
-                    <td className="py-1.5">{r.seq}</td>
+                    <td className="py-1.5 pr-2">{r.seq}</td>
                     <td className="py-1.5">
                       {labels.get(r.id) ?? r.tray}
                       {r.test && <span className="ml-1 rounded bg-sunken px-1 text-xs">테스트</span>}

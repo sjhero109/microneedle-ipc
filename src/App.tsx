@@ -179,9 +179,9 @@ function Shell() {
     <div className="mx-auto flex min-h-screen max-w-[1500px] flex-col gap-3 px-3 pt-3 pb-6 sm:px-4">
       <ConnectionBanner />
       <header className="rounded-xl border border-line bg-panel p-3 sm:p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <h1 className="text-lg font-bold whitespace-nowrap">마이크로니들 IPC</h1>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2 text-sm">
             <NotificationBell />
             <span className="text-right leading-tight whitespace-nowrap">
               <span className="block font-medium">{actor.name}</span>

@@ -160,7 +160,8 @@ function insightsFor(stats: DispenserStats[], labels: Map<string, string>): Insi
     const slopes: number[] = []
     for (let i = 1; i < s.used.length; i++) {
       const dp = s.used[i].pulse - s.used[i - 1].pulse
-      if (Math.abs(dp) > 1e-9) slopes.push((s.used[i].weight - s.used[i - 1].weight) / dp)
+      // 아주 작은 변경은 측정 흔들림이 기울기를 좌우하므로 2% 이상 바꾼 경우만 쓴다
+      if (Math.abs(dp) / s.used[i - 1].pulse >= 0.02) slopes.push((s.used[i].weight - s.used[i - 1].weight) / dp)
     }
     const b = s.used.at(-1)?.model?.b
     const flips = s.used.filter((x, i) => i > 0 && !x.pass && !s.used[i - 1].pass && Math.sign(devOf(x)) !== Math.sign(devOf(s.used[i - 1]))).length
