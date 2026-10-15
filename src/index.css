@@ -65,3 +65,87 @@ textarea,
 button {
   font: inherit;
 }
+
+/* 배치 보고서: 화면에서는 A4 종이처럼, 인쇄할 때는 보고서만 A4로 */
+.report-page {
+  width: 210mm;
+  box-sizing: border-box;
+  margin: 16px auto;
+  padding: 10mm;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.report-first {
+  height: 297mm;
+  overflow: hidden;
+}
+.report-page .rh {
+  font-size: 11.5px;
+  font-weight: 700;
+  border-bottom: 1px solid #c9ced6;
+  padding-bottom: 1px;
+}
+.report-page table.rt {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+.report-page table.rt th,
+.report-page table.rt td {
+  border: 0.5px solid #b9bec7;
+  padding: 1.5px 3px;
+  text-align: center;
+  white-space: nowrap;
+}
+.report-page table.rt th {
+  background: #f0f1f4;
+  color: #3a4250;
+  font-weight: 500;
+}
+.report-page table.rt-raw {
+  font-size: 9.5px;
+}
+
+@page {
+  size: A4;
+  margin: 10mm;
+  @bottom-right {
+    content: counter(page) ' / ' counter(pages);
+    font-size: 9px;
+    color: #5b6472;
+  }
+}
+
+@media print {
+  body.report-open > #root {
+    display: none;
+  }
+  body.report-open {
+    background: #fff;
+  }
+  .report-root {
+    position: static !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  .report-toolbar {
+    display: none !important;
+  }
+  .report-page {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .report-first {
+    height: 277mm;
+    break-after: page;
+  }
+  .report-page table.rt tr {
+    break-inside: avoid;
+  }
+}

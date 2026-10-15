@@ -6,6 +6,7 @@ import { classify } from '../engine'
 import { correctDirectly, includeTestRecords, reviewCorrection, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
 import { CORRECTION_LABEL, DISPENSERS, adjustOf, paramName, roleLabel, targetOf } from '../data/types'
+import { BatchReport } from './BatchReport'
 import { TrendChart } from './TrendChart'
 import { Button, Deviation, Field, Input, Modal, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
@@ -273,6 +274,7 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
   const actor = useActor()
   const [dispenser, setDispenser] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
+  const [reporting, setReporting] = useState(false)
 
   const all = useMemo(
     () => db.records.filter((r) => r.batchId === batch.id).sort((a, b) => a.dispenserId.localeCompare(b.dispenserId) || a.seq - b.seq),
@@ -327,6 +329,9 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
                 IPC 탭에서 열기
               </Button>
             )}
+            <Button onClick={() => setReporting(true)} disabled={all.length === 0} className="h-10 px-3 text-sm">
+              보고서
+            </Button>
             <Button variant="primary" onClick={download} disabled={all.length === 0} className="h-10 px-3 text-sm">
               엑셀 내보내기
             </Button>
@@ -341,6 +346,7 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
           ))}
         </dl>
       </Panel>
+      {reporting && <BatchReport batch={batch} onClose={() => setReporting(false)} />}
 
       {(closed || (actor.role === 'admin' && tests.length > 0)) && (
         <Panel className="flex flex-wrap items-center gap-2 p-3 text-sm">
