@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { Phase } from '../engine'
+import { classify, isPass } from '../engine'
 import { localBackend, newId, type AuditDraft, type Backend, type Write } from './backend'
 import { firebaseEnabled } from './firebase'
 import { batchRecords, dispenserView, evaluate } from './model'
@@ -247,6 +248,39 @@ export async function reopenBatch(actor: Actor, id: string, reason: string) {
   const batch = state.batches.find((b) => b.id === id)
   if (!batch) throw new Error('배치를 찾을 수 없습니다.')
   await commit([{ col: 'batches', id, data: { status: 'open' } }], [audit(actor, '배치 완료 취소', 'batches', id, { before: { status: batch.status }, after: { status: 'open', batchNo: batch.batchNo }, reason })])
+}
+
+/** 배치의 약액부 기록 중 지금 IPC 배수와 다르게 저장된 기록 */
+export function recordsWithOtherShots(batchId: string, shots: number): IpcRecord[] {
+  return state.records.filter((r) => r.batchId === batchId && r.materialType === 'drug' && r.shots !== shots)
+}
+
+/**
+ * 이미 저장한 약액부 기록을 새 IPC 배수로 다시 계산한다 (관리자).
+ * 합산 중량은 그대로 두고 1회분 = 합산 ÷ 배수, 편차·판정은 기록 당시의 목표로 다시 구한다.
+ */
+export async function rescaleShots(actor: Actor, batchId: string, shots: number) {
+  requireAdmin(actor)
+  if (!Number.isInteger(shots) || shots < 1) throw new Error('IPC 배수는 1 이상의 정수로 입력하세요.')
+  const batch = state.batches.find((b) => b.id === batchId)
+  if (!batch) throw new Error('배치를 찾을 수 없습니다.')
+  const targets = recordsWithOtherShots(batchId, shots)
+  for (let i = 0; i < targets.length; i += IMPORT_CHUNK) {
+    const part = targets.slice(i, i + IMPORT_CHUNK)
+    const writes = part.map((r) => {
+      const weight = r.totalWeight / shots
+      const { devPct, band } = classify(weight, r.target, { limits: batch.bands, centerPct: batch.bandCenterPct })
+      return { col: 'records' as const, id: r.id, data: { shots, weight, devPct, band, pass: isPass(weight, r.target, batch.passLowPct, batch.passHighPct) } }
+    })
+    await commit(writes, [
+      audit(actor, '기존 기록 IPC 배수 재계산', 'records', part[0].id, {
+        before: part.map((r) => ({ id: r.id, dispenserId: r.dispenserId, seq: r.seq, shots: r.shots, weight: r.weight, devPct: r.devPct, pass: r.pass })),
+        after: writes.map((w) => ({ id: w.id, ...w.data })),
+        reason: `${batch.batchNo} 배치 IPC 배수를 ${shots}회로 맞춤`,
+      }),
+    ])
+  }
+  return targets.length
 }
 
 /** 테스트로 남긴 기록을 관리자가 계산에 편입한다 */

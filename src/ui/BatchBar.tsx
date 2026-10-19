@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useActor } from '../data/auth'
-import { closeBatch, startBatch, updateBatch, useDb } from '../data/store'
+import { useActor, useAuth } from '../data/auth'
+import { closeBatch, recordsWithOtherShots, rescaleShots, startBatch, updateBatch, useDb } from '../data/store'
 import type { Batch } from '../data/types'
 import { CONTENT_MAX, CONTENT_MIN, adjustOf, adjustRange, baseTargetOf, contentOf, targetForContent } from '../data/types'
 import { Button, Field, Input, NumInput, Select, fmt, parseNum } from './common'
@@ -11,6 +11,9 @@ const today = () => new Date().toLocaleDateString('sv-SE')
 export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id: string | null): void }) {
   const db = useDb()
   const actor = useActor()
+  const { confirm } = useAuth()
+  const [rescale, setRescale] = useState(false)
+  const [notice, setNotice] = useState('')
   const recipes = db.recipes.filter((r) => r.active)
   // 레시피 목록은 화면이 뜬 뒤에 도착할 수 있으므로, 고르기 전에는 첫 레시피를 쓴다
   const [picked, setRecipeId] = useState('')
@@ -83,6 +86,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
             배치 완료
           </Button>
         </div>
+        {notice && <p className="basis-full text-sm text-good">{notice}</p>}
         {closing && (
           <div className="flex basis-full flex-wrap items-center gap-2 rounded-lg border border-bad/40 bg-bad/5 px-3 py-2.5 text-sm">
             <span className="min-w-0 flex-1">
@@ -125,6 +129,9 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const tv = contentOk && baseTarget ? targetForContent(baseTarget, cv) : null
   const targetOk = tv !== null
 
+  // 정보 수정 중: 새 배수와 다르게 저장된 기존 약액부 기록
+  const mismatched = batch && editing && shotsOk ? recordsWithOtherShots(batch.id, n) : []
+
   async function submit() {
     setError('')
     try {
@@ -135,7 +142,14 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
         const da = parseNum(drugAdjust)
         const ba = parseNum(baseAdjust)
         if (da === null || ba === null || da < lo || da > hi || ba < lo || ba > hi) throw new Error(`조정 목표는 적합 범위(${lo}~${hi}%) 안에서 입력하세요.`)
+        // 관리자가 고르면 이미 저장한 약액부 기록도 새 배수로 다시 계산한다
+        if (rescale && mismatched.length) await confirm()
         await updateBatch(actor, batch.id, { drugName: drug, baseName: base, shots: n, mfgDate, contentPct: cv, drugAdjustPct: da, baseAdjustPct: ba })
+        if (rescale && mismatched.length) {
+          const count = await rescaleShots(actor, batch.id, n)
+          setNotice(`기존 약액부 기록 ${count}건을 IPC 배수 ${n}회로 다시 계산했습니다.`)
+        }
+        setRescale(false)
         setEditing(false)
         return
       }
@@ -266,6 +280,24 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
           조정 목표는 추천 Pulse·Speed를 계산할 때 맞추는 중량(목표 대비 %)입니다. 적합 범위({adjustRange(batch)[0]}~{adjustRange(batch)[1]}%) 안에서 약액부와 기저부를
           따로 정할 수 있고, 적합 판정 기준은 바뀌지 않습니다.
         </p>
+      )}
+      {batch && mismatched.length > 0 && (
+        <div className="rounded-lg border border-warn bg-warn/10 px-3 py-2.5 text-sm">
+          <p>
+            이 배치의 약액부 기록 <b>{mismatched.length}건</b>이 다른 IPC 배수(
+            {[...new Set(mismatched.map((r) => r.shots))].map((s) => `${s}회`).join(', ')})로 저장되어 있습니다. 배수를 바꾸면 기본적으로 이후 저장하는 기록부터 적용됩니다.
+          </p>
+          {actor.role === 'admin' ? (
+            <label className="mt-2 flex items-start gap-2">
+              <input type="checkbox" className="mt-0.5 size-4 shrink-0" checked={rescale} onChange={(e) => setRescale(e.target.checked)} />
+              <span>
+                기존 기록 {mismatched.length}건도 <b>{n}회</b>로 다시 계산 (합산 중량은 그대로, 1회분 = 합산 ÷ {n}, 편차·판정 재계산, audit trail에 기록)
+              </span>
+            </label>
+          ) : (
+            <p className="mt-1 text-xs text-sub">기존 기록을 다시 계산하려면 관리자에게 요청하세요.</p>
+          )}
+        </div>
       )}
       {error && <p className="text-sm text-bad">{error}</p>}
     </div>

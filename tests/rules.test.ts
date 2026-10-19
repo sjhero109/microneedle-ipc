@@ -198,6 +198,12 @@ describe('일반 사용자와 관리자', () => {
     await assertFails(withAudit('user', 'batches/batch1', { adjustPct: 101 }, { merge: true }))
   })
 
+  it('기존 기록의 IPC 배수 재계산은 관리자만 한다', async () => {
+    const fix = { shots: 10, weight: 5.55, devPct: -9.2, band: 'red', pass: false }
+    await assertFails(withAudit('user', 'records/rec1', fix, { merge: true }))
+    await assertSucceeds(withAudit('admin', 'records/rec1', fix, { merge: true }))
+  })
+
   it('정정은 누구나 요청하고 관리자만 승인한다', async () => {
     const req = { recordId: 'rec1', field: 'pulse', status: 'pending', requestedBy: 'user1', requestedAt: serverTimestamp() }
     await assertSucceeds(withAudit('user', `corrections/${id('c')}`, req))
