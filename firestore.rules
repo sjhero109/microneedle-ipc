@@ -222,6 +222,11 @@ service cloud.firestore {
         && request.resource.data.get('drugTarget', 1) is number
         && request.resource.data.get('drugTarget', 1) > 0
         && (resource.data.get('status', 'open') != 'closed' || request.resource.data.status == 'open');
+      // 관리자는 완료된 배치라도 배치번호·제조일자·약액부명·기저부명을 고칠 수 있다
+      allow update: if admin() && audited()
+        && onlyChanges(['batchNo', 'mfgDate', 'drugName', 'baseName', 'auditId'])
+        && request.resource.data.batchNo is string
+        && request.resource.data.batchNo.size() > 0;
       allow delete: if false;
     }
 
@@ -236,7 +241,7 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/batches/$(request.resource.data.batchId)).data.get('status', 'open') != 'closed';
       // 기록 수정은 관리자의 정정 승인, 이상치 제외, 테스트 기록의 계산 편입뿐이다
       allow update: if admin() && audited()
-        && onlyChanges(['tray', 'pulse', 'shots', 'totalWeight', 'weight', 'devPct', 'band', 'pass', 'importFixed',
+        && onlyChanges(['tray', 'pulse', 'shots', 'totalWeight', 'weight', 'devPct', 'band', 'pass', 'importFixed', 'batchNo', 'materialName',
                         'excluded', 'excludeReason', 'test', 'auditId']);
       allow delete: if false;
     }

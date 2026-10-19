@@ -3,7 +3,7 @@ import { useActor, useAuth } from '../data/auth'
 import { exportWorkbook } from '../data/excel'
 import { dispenserView, trayLabels, unused } from '../data/model'
 import { classify } from '../engine'
-import { correctDirectly, fixImportedTotals, importedMultiShot, includeTestRecords, reviewCorrection, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
+import { adminEditBatch, correctDirectly, fixImportedTotals, importedMultiShot, includeTestRecords, reviewCorrection, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
 import { CORRECTION_LABEL, DISPENSERS, adjustOf, paramName, roleLabel, targetOf } from '../data/types'
 import { BatchReport } from './BatchReport'
@@ -276,6 +276,11 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
   const [dispenser, setDispenser] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [reporting, setReporting] = useState(false)
+  // 관리자 배치 정보 수정 (완료된 배치도 가능)
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState({ batchNo: batch.batchNo, mfgDate: batch.mfgDate, drugName: batch.drugName, baseName: batch.baseName, reason: '' })
+  const [editMsg, setEditMsg] = useState('')
+  const [editBusy, setEditBusy] = useState(false)
 
   const all = useMemo(
     () => db.records.filter((r) => r.batchId === batch.id).sort((a, b) => a.dispenserId.localeCompare(b.dispenserId) || a.seq - b.seq),
@@ -349,6 +354,74 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
         </dl>
       </Panel>
       {reporting && <BatchReport batch={batch} onClose={() => setReporting(false)} />}
+
+      {actor.role === 'admin' && (
+        <Panel className="p-3 text-sm">
+          {!editing ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sub">관리자: 배치번호·제조일자·약액부명·기저부명 수정 (완료된 배치 포함)</span>
+              <Button
+                className="h-10 px-3 text-sm"
+                onClick={() => {
+                  setForm({ batchNo: batch.batchNo, mfgDate: batch.mfgDate, drugName: batch.drugName, baseName: batch.baseName, reason: '' })
+                  setEditMsg('')
+                  setEditing(true)
+                }}
+              >
+                배치 정보 수정
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                <Field label="배치번호">
+                  <Input value={form.batchNo} onChange={(e) => setForm({ ...form, batchNo: e.target.value })} />
+                </Field>
+                <Field label="제조일자">
+                  <Input type="date" value={form.mfgDate} onChange={(e) => setForm({ ...form, mfgDate: e.target.value })} />
+                </Field>
+                <Field label="약액부명">
+                  <Input value={form.drugName} onChange={(e) => setForm({ ...form, drugName: e.target.value })} />
+                </Field>
+                <Field label="기저부명">
+                  <Input value={form.baseName} onChange={(e) => setForm({ ...form, baseName: e.target.value })} />
+                </Field>
+                <Field label="수정 사유 (필수)" className="col-span-2 md:col-span-4">
+                  <Input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+                </Field>
+              </div>
+              <p className="text-xs text-sub">이 배치의 IPC 기록 {all.length}건에 저장된 배치번호·물질명도 함께 바뀌고, 바꾸기 전후 값이 audit trail에 남습니다.</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="primary"
+                  className="h-10 px-3 text-sm"
+                  disabled={editBusy || !form.batchNo.trim() || !form.reason.trim()}
+                  onClick={async () => {
+                    setEditMsg('')
+                    setEditBusy(true)
+                    try {
+                      await confirm()
+                      const n = await adminEditBatch(actor, batch.id, form, form.reason, (d, t) => setEditMsg(`기록 반영 중 ${d} / ${t}건`))
+                      setEditMsg(`배치 정보를 수정했습니다${n ? ` (기록 ${n}건 반영)` : ''}.`)
+                      setEditing(false)
+                    } catch (e) {
+                      setEditMsg(e instanceof Error ? e.message : '수정하지 못했습니다.')
+                    } finally {
+                      setEditBusy(false)
+                    }
+                  }}
+                >
+                  저장
+                </Button>
+                <Button className="h-10 px-3 text-sm" disabled={editBusy} onClick={() => setEditing(false)}>
+                  취소
+                </Button>
+              </div>
+            </div>
+          )}
+          {editMsg && <p className="mt-2 text-sub">{editMsg}</p>}
+        </Panel>
+      )}
 
       {imported.length > 0 && (
         <Panel className="flex flex-wrap items-center gap-2 border-warn p-3 text-sm">

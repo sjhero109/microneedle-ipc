@@ -316,6 +316,53 @@ export async function fixImportedTotals(actor: Actor, batchId: string) {
   return targets.length
 }
 
+export interface BatchIdentity {
+  batchNo: string
+  mfgDate: string
+  drugName: string
+  baseName: string
+}
+
+/**
+ * 관리자가 배치의 이름 정보(배치번호, 제조일자, 약액부·기저부명)를 고친다. 완료된 배치도 된다.
+ * 기록에도 배치번호·물질명이 함께 저장되어 있으므로 같이 바꾼다.
+ */
+export async function adminEditBatch(actor: Actor, id: string, next: BatchIdentity, reason: string, onProgress?: (done: number, total: number) => void) {
+  requireAdmin(actor)
+  if (!reason.trim()) throw new Error('수정 사유를 입력하세요.')
+  const batch = state.batches.find((b) => b.id === id)
+  if (!batch) throw new Error('배치를 찾을 수 없습니다.')
+  const batchNo = next.batchNo.trim()
+  if (!batchNo) throw new Error('배치번호를 입력하세요.')
+  if (state.batches.some((b) => b.id !== id && b.recipeId === batch.recipeId && b.batchNo === batchNo)) throw new Error('같은 제품에 이미 있는 배치번호입니다.')
+  const patch: Partial<BatchIdentity> = {}
+  for (const k of ['mfgDate', 'drugName', 'baseName'] as const) if (next[k] !== batch[k]) patch[k] = next[k]
+  if (batchNo !== batch.batchNo) patch.batchNo = batchNo
+  if (Object.keys(patch).length === 0) return 0
+  const before = Object.fromEntries(Object.keys(patch).map((k) => [k, batch[k as keyof BatchIdentity]]))
+  await commit([{ col: 'batches', id, data: patch }], [audit(actor, '배치 정보 수정 (관리자)', 'batches', id, { before, after: patch, reason })])
+
+  // 기록에 함께 저장된 배치번호·물질명을 맞춘다
+  const recs = state.records.filter((r) => r.batchId === id)
+  const recPatch = (r: IpcRecord) => {
+    const d: Record<string, string> = {}
+    if (patch.batchNo !== undefined && r.batchNo !== patch.batchNo) d.batchNo = patch.batchNo
+    const name = r.materialType === 'drug' ? patch.drugName : patch.baseName
+    if (name !== undefined && r.materialName !== name) d.materialName = name
+    return d
+  }
+  const targets = recs.filter((r) => Object.keys(recPatch(r)).length)
+  for (let i = 0; i < targets.length; i += IMPORT_CHUNK) {
+    const part = targets.slice(i, i + IMPORT_CHUNK)
+    await commit(
+      part.map((r) => ({ col: 'records' as const, id: r.id, data: recPatch(r) })),
+      [audit(actor, '배치 정보 수정 반영', 'records', part[0].id, { before: { batchNo: batch.batchNo }, after: { ...patch, records: part.map((r) => r.id) }, reason })],
+    )
+    onProgress?.(Math.min(i + IMPORT_CHUNK, targets.length), targets.length)
+  }
+  return targets.length
+}
+
 /** 테스트로 남긴 기록을 관리자가 계산에 편입한다 */
 export async function includeTestRecords(actor: Actor, recordIds: string[]) {
   requireAdmin(actor)

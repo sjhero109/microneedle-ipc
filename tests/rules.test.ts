@@ -469,10 +469,18 @@ describe('배치 완료', () => {
     await assertFails(withAudit('admin', `records/${id('rec')}`, record('admin', { source: 'import' })))
   })
 
+  it('관리자는 완료된 배치의 배치번호를 고칠 수 있다', async () => {
+    await seedClosed()
+    await assertFails(withAudit('user', 'batches/batch1', { batchNo: 'B-2' }, { merge: true }))
+    await assertSucceeds(withAudit('admin', 'batches/batch1', { batchNo: 'B-2', mfgDate: '2026-09-15' }, { merge: true }))
+    await assertFails(withAudit('admin', 'batches/batch1', { batchNo: '' }, { merge: true }))
+    await assertFails(withAudit('admin', 'batches/batch1', { batchNo: 'B-3', shots: 5 }, { merge: true }))
+  })
+
   it('완료된 배치는 다시 열기 전에는 고칠 수 없고, 작업자도 다시 열 수 있다', async () => {
     await seedClosed()
     await assertFails(withAudit('user', 'batches/batch1', { drugName: '변경' }, { merge: true }))
-    await assertFails(withAudit('admin', 'batches/batch1', { drugName: '변경' }, { merge: true }))
+    // 관리자는 완료된 배치도 이름 정보를 고칠 수 있다 (위 테스트), 작업자는 다시 열어야 한다
     await assertSucceeds(withAudit('user', 'batches/batch1', { status: 'open' }, { merge: true }))
     await assertSucceeds(withAudit('user', 'batches/batch1', { drugName: '변경' }, { merge: true }))
     await assertSucceeds(withAudit('user', `records/${id('rec')}`, record('user')))
