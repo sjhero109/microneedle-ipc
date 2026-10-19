@@ -236,7 +236,7 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/batches/$(request.resource.data.batchId)).data.get('status', 'open') != 'closed';
       // 기록 수정은 관리자의 정정 승인, 이상치 제외, 테스트 기록의 계산 편입뿐이다
       allow update: if admin() && audited()
-        && onlyChanges(['tray', 'pulse', 'shots', 'totalWeight', 'weight', 'devPct', 'band', 'pass',
+        && onlyChanges(['tray', 'pulse', 'shots', 'totalWeight', 'weight', 'devPct', 'band', 'pass', 'importFixed',
                         'excluded', 'excludeReason', 'test', 'auditId']);
       allow delete: if false;
     }

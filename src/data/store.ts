@@ -283,6 +283,39 @@ export async function rescaleShots(actor: Actor, batchId: string, shots: number)
   return targets.length
 }
 
+/** 엑셀에서 가져온 약액부 기록 중 배수가 2회 이상인 것 (중량을 1회분으로 잘못 읽었을 수 있는 기록) */
+export function importedMultiShot(batchId: string): IpcRecord[] {
+  return state.records.filter((r) => r.batchId === batchId && r.materialType === 'drug' && r.source === 'import' && r.shots > 1 && !r.importFixed)
+}
+
+/**
+ * 가져올 때 엑셀 중량(이미 N회 합계)을 1회분으로 보고 × N 해 버린 기록을 되돌린다 (관리자).
+ * 합산 중량 = 지금 합산 ÷ 배수 (= 엑셀 원래 값), 1회분 = 합산 ÷ 배수, 편차·판정은 기록 당시 목표로 다시 구한다.
+ */
+export async function fixImportedTotals(actor: Actor, batchId: string) {
+  requireAdmin(actor)
+  const batch = state.batches.find((b) => b.id === batchId)
+  if (!batch) throw new Error('배치를 찾을 수 없습니다.')
+  const targets = importedMultiShot(batchId)
+  for (let i = 0; i < targets.length; i += IMPORT_CHUNK) {
+    const part = targets.slice(i, i + IMPORT_CHUNK)
+    const writes = part.map((r) => {
+      const totalWeight = +(r.totalWeight / r.shots).toFixed(4)
+      const weight = totalWeight / r.shots
+      const { devPct, band } = classify(weight, r.target, { limits: batch.bands, centerPct: batch.bandCenterPct })
+      return { col: 'records' as const, id: r.id, data: { totalWeight, weight, devPct, band, pass: isPass(weight, r.target, batch.passLowPct, batch.passHighPct), importFixed: true } }
+    })
+    await commit(writes, [
+      audit(actor, '가져온 기록 중량 보정', 'records', part[0].id, {
+        before: part.map((r) => ({ id: r.id, dispenserId: r.dispenserId, seq: r.seq, totalWeight: r.totalWeight, weight: r.weight, devPct: r.devPct, pass: r.pass })),
+        after: writes.map((w) => ({ id: w.id, ...w.data })),
+        reason: `${batch.batchNo} 엑셀 중량을 ${part[0].shots}회 합계로 바로잡음 (가져올 때 × ${part[0].shots} 적용됨)`,
+      }),
+    ])
+  }
+  return targets.length
+}
+
 /** 테스트로 남긴 기록을 관리자가 계산에 편입한다 */
 export async function includeTestRecords(actor: Actor, recordIds: string[]) {
   requireAdmin(actor)
@@ -409,6 +442,8 @@ export async function importRecords(
     seq.set(row.dispenserId, next)
     const rec = buildRecord(working, actor, batch, row.dispenserId, { ...row, phase: row.tray === 0 || row.tray === 1 ? 'startup' : 'routine' }, next, {
       source: 'import',
+      // 가져오기 화면에서 중량 열의 뜻(합계·1회분)을 정해 저장하므로 나중 보정 대상이 아니다
+      importFixed: true,
       importFile: file,
     })
     created.push(rec)

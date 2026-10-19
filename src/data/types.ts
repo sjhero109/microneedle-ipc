@@ -120,6 +120,8 @@ export interface IpcRecord {
   excludeReason?: string
   source: 'manual' | 'import'
   importFile?: string
+  /** 가져온 중량을 합계로 바로잡은 기록 (보정은 한 번만 한다) */
+  importFixed?: boolean
   createdAt: number
   createdBy: string
   createdByName: string

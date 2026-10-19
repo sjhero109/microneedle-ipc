@@ -3,7 +3,7 @@ import { useActor, useAuth } from '../data/auth'
 import { exportWorkbook } from '../data/excel'
 import { dispenserView, trayLabels, unused } from '../data/model'
 import { classify } from '../engine'
-import { correctDirectly, includeTestRecords, reviewCorrection, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
+import { correctDirectly, fixImportedTotals, importedMultiShot, includeTestRecords, reviewCorrection, logEvent, reopenBatch, requestCorrection, setExcluded, useDb } from '../data/store'
 import type { Batch, Correction, IpcRecord } from '../data/types'
 import { CORRECTION_LABEL, DISPENSERS, adjustOf, paramName, roleLabel, targetOf } from '../data/types'
 import { BatchReport } from './BatchReport'
@@ -286,6 +286,7 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
   const [reason, setReason] = useState('')
   const closed = batch.status === 'closed'
   const tests = all.filter((r) => r.test)
+  const imported = actor.role === 'admin' ? importedMultiShot(batch.id) : []
   const act = async (fn: () => Promise<string>) => {
     setNote('')
     try {
@@ -347,6 +348,19 @@ function BatchRecords({ batch, onBack, onOpenBatch }: { batch: Batch; onBack(): 
         </dl>
       </Panel>
       {reporting && <BatchReport batch={batch} onClose={() => setReporting(false)} />}
+
+      {imported.length > 0 && (
+        <Panel className="flex flex-wrap items-center gap-2 border-warn p-3 text-sm">
+          <span className="min-w-0 flex-1">
+            엑셀에서 가져온 약액부 기록 <b>{imported.length}건</b>(IPC 배수 {imported[0].shots}회). 엑셀 중량이 이미 {imported[0].shots}회 합계였는데 가져올 때 × {imported[0].shots}가 적용됐다면 보정하세요.
+            예: 합산 {fmt(imported[0].totalWeight, 2)} mg → {fmt(imported[0].totalWeight / imported[0].shots, 2)} mg, 1회분 {fmt(imported[0].weight, 3)} → {fmt(imported[0].weight / imported[0].shots, 3)} mg.
+          </span>
+          <Button className="h-10 px-3 text-sm" onClick={() => act(async () => `가져온 기록 ${await fixImportedTotals(actor, batch.id)}건의 중량을 보정했습니다.`)}>
+            가져온 기록 중량 보정 (÷ {imported[0].shots})
+          </Button>
+          {note && <span className="basis-full text-sub">{note}</span>}
+        </Panel>
+      )}
 
       {(closed || (actor.role === 'admin' && tests.length > 0)) && (
         <Panel className="flex flex-wrap items-center gap-2 p-3 text-sm">

@@ -127,7 +127,11 @@ const text = (v: unknown) => String(v ?? '').replace(/\s/g, '').toUpperCase()
  *   2행: 회차 | PULSE | 중량  또는  PULSE | 중량*3 | 중량
  * 합산 중량 열(중량*N)이 있으면 그 값을, 없으면 1회분 중량을 읽는다.
  */
-export function parseImport(data: ArrayBuffer, shots: number): ParsedSheet[] {
+/**
+ * weightAs: 중량 열을 무엇으로 읽을지. 지정하지 않으면 열 이름으로 정한다
+ * ("중량*N" 열이 있으면 합산값, "중량"만 있으면 1회분).
+ */
+export function parseImport(data: ArrayBuffer, shots: number, weightAs?: 'total' | 'per-shot'): ParsedSheet[] {
   const wb = XLSX.read(data)
   const out: ParsedSheet[] = []
   for (const name of wb.SheetNames) {
@@ -155,7 +159,8 @@ export function parseImport(data: ArrayBuffer, shots: number): ParsedSheet[] {
         const p = num(r[pulse])
         const w = total !== undefined ? num(r[total]) : single !== undefined ? num(r[single]) : null
         if (p === null || w === null) return
-        const perShotToTotal = total !== undefined ? 1 : dispenserId.startsWith('D') ? shots : 1
+        const kind = weightAs ?? (total !== undefined ? 'total' : 'per-shot')
+        const perShotToTotal = kind === 'total' ? 1 : dispenserId.startsWith('D') ? shots : 1
         rows.push({
           dispenserId,
           tray: (tray !== undefined ? num(r[tray]) : null) ?? idx + 1,

@@ -180,6 +180,8 @@ function Import() {
   const [drugName, setDrugName] = useState<string | null>(null)
   const [baseName, setBaseName] = useState<string | null>(null)
   const [shots, setShots] = useState('3')
+  // 엑셀 중량 열의 뜻: 자동(열 이름), 합계 그대로, 1회분(× 배수)
+  const [weightAs, setWeightAs] = useState<'auto' | 'total' | 'per-shot'>('auto')
   const [file, setFile] = useState<{ name: string; data: ArrayBuffer } | null>(null)
   // 고르기 전에는 회차 열이 있는 시트를 쓴다
   const [sheet, setSheet] = useState<number | null>(null)
@@ -193,7 +195,7 @@ function Import() {
   let sheets: ParsedSheet[] = []
   if (file && n && n >= 1) {
     try {
-      sheets = parseImport(file.data, n)
+      sheets = parseImport(file.data, n, weightAs === 'auto' ? undefined : weightAs)
     } catch {
       sheets = []
     }
@@ -289,8 +291,17 @@ function Import() {
               ))}
             </Select>
             <span className="num text-sm">
-              {counts.join(' · ')} · 중량 열: {chosen.weightKind === 'total' ? '합산값' : `1회분 (× ${n}배로 환산)`}
+              {counts.join(' · ')}
             </span>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-sub">엑셀 중량 값</span>
+            <Select value={weightAs} onChange={(e) => setWeightAs(e.target.value as typeof weightAs)} className="!h-10 !w-auto">
+              <option value="auto">자동 — 열 이름 기준 ({chosen.weightKind === 'total' || weightAs === 'total' ? '합계' : '1회분'})</option>
+              <option value="total">{n}회 합계 그대로 저장</option>
+              <option value="per-shot">1회분 → × {n} 해서 합계로 저장</option>
+            </Select>
+            <span className="text-xs text-sub">약액부 IPC 배수 {n}회. 엑셀 값이 이미 {n}번 토출한 합계라면 "합계 그대로"를 고르세요.</span>
           </div>
           <table className="num mt-2 w-full max-w-md text-sm">
             <thead>
