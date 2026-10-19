@@ -149,3 +149,17 @@ button {
     break-inside: avoid;
   }
 }
+
+/* 비교 보고서: 쪽마다 한 장 */
+.report-sheet {
+  min-height: 297mm;
+}
+@media print {
+  .report-sheet {
+    min-height: 0;
+    break-after: page;
+  }
+  .report-sheet:last-child {
+    break-after: auto;
+  }
+}

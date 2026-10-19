@@ -7,6 +7,7 @@ import { correctDirectly, fixImportedTotals, importedMultiShot, includeTestRecor
 import type { Batch, Correction, IpcRecord } from '../data/types'
 import { CORRECTION_LABEL, DISPENSERS, adjustOf, paramName, roleLabel, targetOf } from '../data/types'
 import { BatchReport } from './BatchReport'
+import { CompareReport } from './CompareReport'
 import { TrendChart } from './TrendChart'
 import { Button, Deviation, Field, Input, Modal, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
@@ -477,6 +478,9 @@ export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
+  // 비교 보고서에 넣을 배치
+  const [picked, setPicked] = useState<Set<string>>(() => new Set())
+  const [showCompare, setShowCompare] = useState(false)
 
   const list = useMemo(() => {
     const byBatch = new Map<string, IpcRecord[]>()
@@ -507,6 +511,14 @@ export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
   }, [db.batches, db.records, product, query, from, to])
 
   const chosen = selected ? db.batches.find((b) => b.id === selected) : undefined
+  const comparing = db.batches.filter((b) => picked.has(b.id))
+  const togglePick = (id: string) =>
+    setPicked((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
   if (chosen) return <BatchRecords batch={chosen} onBack={() => setSelected(null)} onOpenBatch={onOpenBatch} />
 
   const products = [...new Set(db.batches.map((b) => b.productName))]
@@ -545,16 +557,36 @@ export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
           <Button variant="primary" onClick={downloadAll} disabled={list.every((x) => x.count === 0)} className="col-span-2 md:col-span-1">
             조회된 배치 엑셀 내보내기
           </Button>
+          <Button onClick={() => setShowCompare(true)} disabled={comparing.length === 0} className="col-span-2 md:col-span-1">
+            선택한 배치 비교 보고서{comparing.length ? ` (${comparing.length})` : ''}
+          </Button>
         </div>
       </Panel>
 
-      <div className="num text-sm text-sub">배치 {list.length}건</div>
+      <div className="num flex flex-wrap items-center gap-x-3 text-sm text-sub">
+        <span>배치 {list.length}건</span>
+        <span>· 비교할 배치를 왼쪽 칸에서 고르세요{comparing.length ? ` (선택 ${comparing.length}개)` : ''}</span>
+        {comparing.length > 0 && (
+          <button type="button" className="text-accent" onClick={() => setPicked(new Set())}>
+            선택 해제
+          </button>
+        )}
+      </div>
+      {showCompare && comparing.length > 0 && <CompareReport batches={comparing} onClose={() => setShowCompare(false)} />}
 
       {/* PC: 표 */}
       <Panel className="hidden overflow-x-auto md:block">
         <table className="num w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs text-sub">
+              <th className="w-8 px-3 py-2">
+                <input
+                  type="checkbox"
+                  aria-label="조회된 배치 모두 선택"
+                  checked={list.length > 0 && list.every((x) => picked.has(x.batch.id))}
+                  onChange={(e) => setPicked(e.target.checked ? new Set(list.map((x) => x.batch.id)) : new Set())}
+                />
+              </th>
               {['제조일자', '제품명', '배치번호', '상태', '약액부명', '기저부명', 'IPC 기록', '부적합', '테스트', '마지막 기록'].map((h) => (
                 <th key={h} className="px-3 py-2 font-medium whitespace-nowrap">
                   {h}
@@ -565,6 +597,9 @@ export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
           <tbody>
             {list.map(({ batch: b, date, count, fails, tests, last }) => (
               <tr key={b.id} onClick={() => setSelected(b.id)} className="cursor-pointer border-b border-line/60 hover:bg-sunken">
+                <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" aria-label={`${b.batchNo} 비교에 넣기`} checked={picked.has(b.id)} onChange={() => togglePick(b.id)} />
+                </td>
                 <td className="px-3 py-2.5 whitespace-nowrap">{date}</td>
                 <td className="px-3 py-2.5">{b.productName}</td>
                 <td className="px-3 py-2.5 font-semibold">{b.batchNo}</td>
@@ -584,8 +619,11 @@ export function HistoryTab({ onOpenBatch }: { onOpenBatch(id: string): void }) {
       {/* 모바일: 카드 */}
       <ul className="flex flex-col gap-2 md:hidden">
         {list.map(({ batch: b, date, count, fails, tests }) => (
-          <li key={b.id}>
-            <button type="button" onClick={() => setSelected(b.id)} className="num w-full rounded-xl border border-line bg-panel px-3 py-2.5 text-left">
+          <li key={b.id} className="flex items-stretch gap-2">
+            <label className="flex items-center rounded-xl border border-line bg-panel px-3">
+              <input type="checkbox" className="size-4" aria-label={`${b.batchNo} 비교에 넣기`} checked={picked.has(b.id)} onChange={() => togglePick(b.id)} />
+            </label>
+            <button type="button" onClick={() => setSelected(b.id)} className="num w-full min-w-0 rounded-xl border border-line bg-panel px-3 py-2.5 text-left">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold">{b.batchNo}</span>
                 <span className="text-sm text-sub">
