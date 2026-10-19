@@ -33,3 +33,7 @@ data/seed/
 *-debug.log
 !.env.emulator
 dist-hosting/
+
+# 공정 데이터 엑셀은 저장소에 올리지 않는다
+/*.xlsx
+~$*
