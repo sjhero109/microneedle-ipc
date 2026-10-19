@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useActor } from '../data/auth'
-import { buildComparison, compareFindings, type BatchColumn } from '../data/compare'
+import { buildComparison, compareDiscussion, compareFindings, type BatchColumn } from '../data/compare'
 import type { DispenserStats } from '../data/report'
 import { logEvent, useDb } from '../data/store'
 import type { Batch } from '../data/types'
@@ -115,6 +115,7 @@ export function CompareReport({ batches, onClose }: { batches: Batch[]; onClose(
   const actor = useActor()
   const cols = useMemo(() => buildComparison(batches, db.records), [batches, db.records])
   const findings = useMemo(() => compareFindings(cols), [cols])
+  const discussion = useMemo(() => compareDiscussion(cols), [cols])
   const printedAt = useMemo(() => Date.now(), [])
   const active = DISPENSERS.filter((d) => cols.some((c) => c.stats.get(d.id)!.n > 0))
   const first = cols[0]?.batch
@@ -335,6 +336,23 @@ export function CompareReport({ batches, onClose }: { batches: Batch[]; onClose(
             </tbody>
           </table>
           <div className="text-[9.5px] text-[#5b6472]">굵은 빨강 = 10트레이당 1%p 이상 감소, 굵은 파랑 = 1%p 이상 증가 (5건 이상일 때). IPC가 적거나 Pulse를 트레이와 함께 꾸준히 올린 배치는 두 영향을 가르기 어려워 값이 크게 흔들릴 수 있습니다.</div>
+        </section>
+
+        {/* 마지막: 고찰 */}
+        <section className="report-page report-sheet flex flex-col gap-[7px]">
+          {header('고찰')}
+          <div className="text-[10px] text-[#5b6472]">앞쪽의 비교 결과를 규칙에 따라 정리한 것입니다. 수치는 테스트·제외 기록을 뺀 1회분 기준입니다.</div>
+          <ol className="flex flex-col gap-2.5 pl-0">
+            {discussion.map((d, i) => (
+              <li key={d.title} className="flex gap-2.5 text-[11.5px] leading-relaxed">
+                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center bg-[#14284b] text-[10px] font-bold text-white">{i + 1}</span>
+                <div>
+                  <div className="font-bold text-[#14284b]">{d.title}</div>
+                  <div className="text-[#2a3240]">{d.text}</div>
+                </div>
+              </li>
+            ))}
+          </ol>
         </section>
       </div>
     </div>,

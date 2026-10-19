@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildComparison, compareFindings, inBatchTrend } from './compare'
+import { buildComparison, compareDiscussion, compareFindings, inBatchTrend } from './compare'
 import type { Batch, IpcRecord } from './types'
 import { DEFAULT_CRITERIA } from './types'
 
@@ -32,5 +32,14 @@ describe('배치 비교', () => {
     const f = compareFindings(cols)
     expect(f[0].id).toBe('D1')
     expect(f[0].text).toContain('적합률 최고 A')
+  })
+
+  it('비교 결과로 고찰을 쓴다', () => {
+    const records = [rec('A', 1, 5, 6.6), rec('A', 11, 5.1, 5.4), rec('B', 1, 5, 6.05), rec('B', 11, 5, 6.1)]
+    const d = compareDiscussion(buildComparison([batch('A', '2026-10-01'), batch('B', '2026-10-02')], records))
+    const titles = d.map((x) => x.title)
+    expect(titles).toContain('전반 경향')
+    expect(titles.at(-1)).toBe('해석 시 유의')
+    expect(d[0].text).toContain('0% → B 100%')
   })
 })
