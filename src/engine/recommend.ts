@@ -26,6 +26,8 @@ export interface Recommendation {
   delta: number
   /** 추천 Pulse 적용 직후 예상 중량 */
   expectedAfter: number
+  /** 계산값이 허용 범위를 벗어나 끝값으로 자른 경우 */
+  limited?: 'min' | 'max'
 }
 
 /**
@@ -38,10 +40,18 @@ export function recommend(i: RecommendInput): Recommendation {
   const expectedNow = weightAt(params, state.L, i.pulseNow)
   const expectedNext = expectedNow + params.drift * i.trayInterval
   let pulse = i.pulseNow + (targetWeight - expectedNow) / params.b
-  if (i.pulseMin !== undefined) pulse = Math.max(pulse, i.pulseMin)
-  if (i.pulseMax !== undefined) pulse = Math.min(pulse, i.pulseMax)
+  let limited: Recommendation['limited']
+  if (i.pulseMin !== undefined && pulse < i.pulseMin) {
+    pulse = i.pulseMin
+    limited = 'min'
+  }
+  if (i.pulseMax !== undefined && pulse > i.pulseMax) {
+    pulse = i.pulseMax
+    limited = 'max'
+  }
   pulse = Math.max(roundTo(pulse, i.pulseStep), i.pulseStep)
   return {
+    ...(limited ? { limited } : {}),
     targetWeight,
     expectedNow,
     expectedNext,

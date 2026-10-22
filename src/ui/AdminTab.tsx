@@ -2,14 +2,16 @@ import { useState } from 'react'
 import { useActor, useAuth } from '../data/auth'
 import { adminResetPassword, createAccount, firebaseEnabled, sendPasswordReset } from '../data/firebase'
 import { exportWorkbook, parseImport, type ParsedSheet } from '../data/excel'
-import { importRecords, logEvent, saveIdleMinutes, logAdminAction, markPasswordReset, reviewCorrection, saveRecipe, saveUser, setExcluded, startBatch, unlockAccount, useDb, type RecipeInput } from '../data/store'
-import type { Recipe, Role, UserProfile } from '../data/types'
-import { CORRECTION_LABEL, DEFAULT_CRITERIA, IDLE_MAX, IDLE_MIN, RESET_PASSWORD, idleMinutesOf, paramName, roleLabel } from '../data/types'
+import { importRecords, logEvent, saveDoe, saveIdleMinutes, logAdminAction, markPasswordReset, reviewCorrection, saveRecipe, saveUser, setExcluded, startBatch, unlockAccount, useDb, type RecipeInput } from '../data/store'
+import { recordControl } from '../data/model'
+import type { Control, DispenserId, DoePrior, Recipe, Role, UserProfile } from '../data/types'
+import { CORRECTION_LABEL, DEFAULT_CRITERIA, DISPENSERS, IDLE_MAX, IDLE_MIN, PRESSURE_STEP_DEFAULT, RESET_PASSWORD, controlOf, ctrlName, ctrlUnit, doeOf, idleMinutesOf, roleLabel } from '../data/types'
 import { Button, Deviation, Field, Input, NumInput, Panel, Select, dateTime, fmt, parseNum } from './common'
 
-type Section = 'recipes' | 'import' | 'review' | 'audit' | 'users' | 'settings'
+type Section = 'recipes' | 'doe' | 'import' | 'review' | 'audit' | 'users' | 'settings'
 const SECTIONS: [Section, string][] = [
   ['recipes', '레시피'],
+  ['doe', 'DOE·압력'],
   ['import', '데이터 가져오기'],
   ['review', '정정·이상치 검토'],
   ['audit', 'Audit trail'],
@@ -28,7 +30,7 @@ const BLANK: RecipeInput = {
   active: true,
 }
 
-type NumKey = 'drugTarget' | 'baseTarget' | 'defaultShots' | 'adjustPct' | 'bandCenterPct' | 'passLowPct' | 'passHighPct' | 'pulseStep'
+type NumKey = 'drugTarget' | 'baseTarget' | 'defaultShots' | 'adjustPct' | 'bandCenterPct' | 'passLowPct' | 'passHighPct' | 'pulseStep' | 'pressureStep'
 
 function RecipeForm({ recipe, first, onDone }: { recipe: Recipe | null; first: boolean; onDone(): void }) {
   const actor = useActor()
@@ -49,7 +51,10 @@ function RecipeForm({ recipe, first, onDone }: { recipe: Recipe | null; first: b
     passLowPct: String(init.passLowPct),
     passHighPct: String(init.passHighPct),
     pulseStep: String(init.pulseStep),
+    pressureStep: String(init.pressureStep ?? PRESSURE_STEP_DEFAULT),
   })
+  // 예전 레시피는 값이 없으므로 Pulse 방식으로 보여 준다
+  const [control, setControl] = useState<Control>(controlOf(init))
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
 
@@ -70,6 +75,7 @@ function RecipeForm({ recipe, first, onDone }: { recipe: Recipe | null; first: b
       if (!(b[0]! < b[1]! && b[1]! < b[2]!)) throw new Error('경고 구간은 작은 값부터 순서대로 입력하세요.')
       if (!(v.passLowPct! < v.passHighPct!)) throw new Error('적합 범위의 하한은 상한보다 작아야 합니다.')
       if (!Number.isInteger(v.defaultShots) || v.defaultShots! < 1) throw new Error('IPC 배수는 1 이상의 정수입니다.')
+      if (!(v.pressureStep! > 0) || !(v.pulseStep! > 0)) throw new Error('최소 단위는 0보다 커야 합니다.')
       if (recipe && !reason.trim()) throw new Error('변경 사유를 입력하세요.')
       await confirm()
       await saveRecipe(
@@ -82,6 +88,7 @@ function RecipeForm({ recipe, first, onDone }: { recipe: Recipe | null; first: b
           active,
           bands: b as [number, number, number],
           ...(v as Record<NumKey, number>),
+          control,
         },
         reason,
       )
@@ -106,7 +113,14 @@ function RecipeForm({ recipe, first, onDone }: { recipe: Recipe | null; first: b
           <Input value={baseName} onChange={(e) => setBaseName(e.target.value)} />
         </Field>
         {num('defaultShots', '약액부 IPC 배수 기본값')}
-        {num('pulseStep', 'Pulse·Speed 최소 단위')}
+        <Field label="조절 방식">
+          <Select value={control} onChange={(e) => setControl(e.target.value as Control)}>
+            <option value="pressure">압력 (MPa)</option>
+            <option value="pulse">Pulse·Speed (ms)</option>
+          </Select>
+        </Field>
+        {num('pressureStep', '압력 최소 단위 (MPa)')}
+        {num('pulseStep', 'Pulse·Speed 최소 단위 (ms)')}
         {num('passLowPct', '적합 하한 (목표 대비 %)')}
         {num('passHighPct', '적합 상한 (목표 대비 %)')}
         {num('adjustPct', '조정 희망 비율 (목표 대비 %)')}
@@ -398,7 +412,7 @@ function Review() {
                   {r.productName} / {r.batchNo} · {r.dispenserId} #{r.seq}
                 </span>
                 <span>
-                  {paramName(r.materialType)} {r.pulse} · {fmt(r.weight, 3)} mg
+                  {ctrlName(recordControl(r), r.materialType)} {r.pulse} {ctrlUnit(recordControl(r))} · {fmt(r.weight, 3)} mg
                 </span>
                 <Deviation devPct={r.devPct} band={r.band} />
               </div>
@@ -591,6 +605,119 @@ function Users() {
   )
 }
 
+type DoeKey = keyof DoePrior
+const DOE_FIELDS: [DoeKey, string][] = [
+  ['k', '감도 k (mg/MPa)'],
+  ['p0', '기준 압력 P₀ (MPa)'],
+  ['pMin', '압력 하한 (MPa)'],
+  ['pMax', '압력 상한 (MPa)'],
+  ['settle', '변경 후 버림 토출 (회)'],
+]
+
+/** DOE(압력 응답 시험) 결과 입력. 압력 방식 배치의 계산식 출발점과 추천 압력 범위가 된다 */
+function DoeSection() {
+  const db = useDb()
+  const actor = useActor()
+  const { confirm } = useAuth()
+  const meta = db.settings.find((s) => s.id === 'doe')
+  const init = () =>
+    Object.fromEntries(DISPENSERS.map((d) => [d.id, Object.fromEntries(DOE_FIELDS.map(([k]) => [k, doeOf(db, d.id)[k]?.toString() ?? '']))])) as Record<
+      DispenserId,
+      Record<DoeKey, string>
+    >
+  const [form, setForm] = useState(init)
+  const [reason, setReason] = useState('')
+  const [error, setError] = useState('')
+  const [msg, setMsg] = useState('')
+  const set = (id: DispenserId, k: DoeKey, v: string) => setForm({ ...form, [id]: { ...form[id], [k]: v } })
+
+  async function save() {
+    setError('')
+    setMsg('')
+    try {
+      const next = {} as Record<DispenserId, DoePrior>
+      for (const d of DISPENSERS) {
+        const row = {} as DoePrior
+        for (const [k] of DOE_FIELDS) {
+          const s = form[d.id][k].trim()
+          const n = s === '' ? null : parseNum(s)
+          if (s !== '' && n === null) throw new Error(`${d.id}: 숫자를 확인하세요.`)
+          row[k] = n
+        }
+        next[d.id] = row
+      }
+      await confirm()
+      await saveDoe(actor, next, reason)
+      setReason('')
+      setMsg('DOE 값을 저장했습니다. 압력 방식 배치의 추천에 바로 반영됩니다.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '저장하지 못했습니다.')
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <h3 className="font-semibold">DOE 결과 (압력 응답 시험)</h3>
+      <p className="text-sm text-sub">
+        압력 방식 배치에서 토출기별 계산식의 출발점입니다. 감도 k는 압력 1 MPa당 1회 토출 중량 변화(mg)로, 압력 응답 시험의 회귀 기울기를 넣습니다(예: 0.01 MPa에 0.07 mg이면
+        7). 기준 압력 P₀는 목표 중량이 나오는 압력입니다. 압력 기록이 쌓이면 기록으로 고쳐 가고, 기록으로 감도를 믿기 어려우면 k를 씁니다. 추천 압력은 하한~상한 안으로
+        자릅니다. 비워 둔 칸은 쓰지 않습니다.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="num w-full min-w-[720px] text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs text-sub">
+              <th className="py-1.5 pr-2 font-medium">토출기</th>
+              {DOE_FIELDS.map(([k, label]) => (
+                <th key={k} className="py-1.5 pr-2 font-medium">
+                  {label}
+                </th>
+              ))}
+              <th className="py-1.5 font-medium">0.001 MPa당</th>
+            </tr>
+          </thead>
+          <tbody>
+            {DISPENSERS.map((d) => {
+              const k = parseNum(form[d.id].k)
+              return (
+                <tr key={d.id} className="border-b border-line/60">
+                  <td className="py-1.5 pr-2 font-medium">{d.id}</td>
+                  {DOE_FIELDS.map(([f]) => (
+                    <td key={f} className="py-1.5 pr-2">
+                      <NumInput value={form[d.id][f]} onChange={(e) => set(d.id, f, e.target.value)} className="h-9" />
+                    </td>
+                  ))}
+                  <td className="py-1.5 text-xs text-sub">{k ? `${fmt(k / 1000, 4)} mg` : '–'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <Field label="변경 사유 (필수)" className="max-w-xl">
+        <Input value={reason} onChange={(e) => setReason(e.target.value)} />
+      </Field>
+      <div className="flex items-center gap-2">
+        <Button variant="primary" onClick={save} disabled={!reason.trim()}>
+          저장
+        </Button>
+        <Button
+          onClick={() => {
+            setForm(init())
+            setError('')
+            setMsg('')
+          }}
+        >
+          되돌리기
+        </Button>
+      </div>
+      <p className="text-xs text-sub">{meta ? `${meta.updatedByName} · ${dateTime(meta.updatedAt)} 변경` : '아직 입력한 DOE 값이 없습니다.'}</p>
+      {error && <p className="text-sm text-bad">{error}</p>}
+      {msg && <p className="text-sm text-good">{msg}</p>}
+    </div>
+  )
+}
+
 function Settings() {
   const db = useDb()
   const actor = useActor()
@@ -661,6 +788,7 @@ export function AdminTab() {
       </div>
       <Panel className="p-4">
         {section === 'recipes' && <Recipes />}
+        {section === 'doe' && <DoeSection />}
         {section === 'import' && <Import />}
         {section === 'review' && <Review />}
         {section === 'audit' && <Audit />}

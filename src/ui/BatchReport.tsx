@@ -5,7 +5,7 @@ import { dispenserView, unused } from '../data/model'
 import { buildReport, type DispenserStats } from '../data/report'
 import { logEvent, useDb } from '../data/store'
 import type { Batch, IpcRecord } from '../data/types'
-import { CORRECTION_LABEL, DISPENSERS, PARAM_UNIT, adjustOf, contentOf } from '../data/types'
+import { CORRECTION_LABEL, DISPENSERS, adjustOf, contentOf, controlOf, ctrlUnit } from '../data/types'
 import { Button, dateTime, fmt, signed, timeOnly } from './common'
 
 const ZONE_COLOR = ['#3b8a1e', '#e0a100', '#d03b3b', '#7c3aed']
@@ -343,7 +343,7 @@ export function BatchReport({ batch, onClose }: { batch: Batch; onClose(): void 
                 <th>적합</th>
                 <th>첫 적합</th>
                 <th>Cpk</th>
-                <th>{`Pulse·Speed 시작→최종 (${PARAM_UNIT})`}</th>
+                <th>{`${controlOf(batch) === 'pressure' ? '압력' : 'Pulse·Speed'} 시작→최종 (${ctrlUnit(controlOf(batch))})`}</th>
               </tr>
             </thead>
             <tbody>
@@ -413,7 +413,7 @@ export function BatchReport({ batch, onClose }: { batch: Batch; onClose(): void 
                 <th>#</th>
                 <th>트레이</th>
                 <th>저장</th>
-                <th>{`Pulse·Speed (${PARAM_UNIT})`}</th>
+                <th>{`${controlOf(batch) === 'pressure' ? '압력' : 'Pulse·Speed'} (${ctrlUnit(controlOf(batch))})`}</th>
                 <th>배수</th>
                 <th>합산 mg</th>
                 <th>1회 mg</th>

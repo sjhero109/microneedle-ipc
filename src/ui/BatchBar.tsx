@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useActor, useAuth } from '../data/auth'
-import { closeBatch, recordsWithOtherShots, rescaleShots, startBatch, updateBatch, useDb } from '../data/store'
-import type { Batch } from '../data/types'
-import { CONTENT_MAX, CONTENT_MIN, adjustOf, adjustRange, baseTargetOf, contentOf, targetForContent } from '../data/types'
+import { closeBatch, recordsWithOtherShots, rescaleShots, setBatchControl, startBatch, updateBatch, useDb } from '../data/store'
+import type { Batch, Control } from '../data/types'
+import { CONTENT_MAX, CONTENT_MIN, adjustOf, adjustRange, baseTargetOf, contentOf, controlOf, ctrlUnit, stepOf, targetForContent } from '../data/types'
 import { Button, Field, Input, NumInput, Select, fmt, parseNum } from './common'
 
 const today = () => new Date().toLocaleDateString('sv-SE')
@@ -49,6 +49,7 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       ['약액부 IPC 배수', batch.shots > 1 ? `${batch.shots}회 (${fmt(batch.drugTarget * batch.shots, 2)} mg)` : '1회'],
       ['약액부 조정 목표', `${adjustOf(batch, 'drug')}%`],
       ['기저부 조정 목표', `${adjustOf(batch, 'base')}%`],
+      ['조절 방식', controlOf(batch) === 'pressure' ? `압력 (${ctrlUnit('pressure')}, ${stepOf(batch)} 단위)` : 'Pulse·Speed (ms)'],
     ]
     return (
       <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
@@ -86,6 +87,28 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
             배치 완료
           </Button>
         </div>
+        {actor.role === 'admin' && (
+          <label className="flex basis-full items-center gap-2 text-xs text-sub">
+            <span className="whitespace-nowrap">관리자: 조절 방식</span>
+            <Select
+              className="h-9 max-w-48 text-xs"
+              value={controlOf(batch)}
+              onChange={async (e) => {
+                setError('')
+                try {
+                  await confirm()
+                  await setBatchControl(actor, batch.id, e.target.value as Control)
+                  setNotice(e.target.value === 'pressure' ? '이 배치는 이제 압력을 추천합니다. 과거 Pulse 기록은 압력 계산에 쓰지 않습니다.' : '이 배치는 이제 Pulse·Speed를 추천합니다.')
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : '바꾸지 못했습니다.')
+                }
+              }}
+            >
+              <option value="pressure">압력 (MPa)</option>
+              <option value="pulse">Pulse·Speed (ms)</option>
+            </Select>
+          </label>
+        )}
         {notice && <p className="basis-full text-sm text-good">{notice}</p>}
         {closing && (
           <div className="flex basis-full flex-wrap items-center gap-2 rounded-lg border border-bad/40 bg-bad/5 px-3 py-2.5 text-sm">
@@ -268,16 +291,16 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
       {recipe && !batch && (
         <p className="num text-xs text-sub">
           목표 중량: 약액부 {targetOk ? fmt(tv, 3) : '–'} mg{targetOk ? ` (함량 ${cv}% 환산: ${fmt(baseTarget ?? 0, 2)} × 100 ÷ ${cv})` : ''}
-          {targetOk && shotsOk && n > 1 ? ` · 같은 Pulse로 ${n}회 토출한 합계 ${fmt(tv * n, 2)} mg` : ''} · 기저부{' '}
+          {targetOk && shotsOk && n > 1 ? ` · 같은 설정으로 ${n}회 토출한 합계 ${fmt(tv * n, 2)} mg` : ''} · 기저부{' '}
           {fmt(recipe.baseTarget, 1)} mg
         </p>
       )}
       {batch && (
         <p className="text-xs text-sub">
           함량 {contentOk ? cv : '–'}% → 약액부 목표 중량 <b>{targetOk ? fmt(tv, 3) : '–'} mg</b> (= {fmt(baseTarget ?? 0, 2)} × 100 ÷ 함량). 함량을 바꾸면 그 뒤에 저장하는 IPC부터 새
-          목표로 판정하고 추천 Pulse도 새 목표에 맞춰 계산합니다. 이미 저장한 기록의 판정은 바뀌지 않습니다. 기저부 목표 중량은 함량과 무관합니다.
+          목표로 판정하고 추천 압력·Pulse도 새 목표에 맞춰 계산합니다. 이미 저장한 기록의 판정은 바뀌지 않습니다. 기저부 목표 중량은 함량과 무관합니다.
           <br />
-          조정 목표는 추천 Pulse·Speed를 계산할 때 맞추는 중량(목표 대비 %)입니다. 적합 범위({adjustRange(batch)[0]}~{adjustRange(batch)[1]}%) 안에서 약액부와 기저부를
+          조정 목표는 추천 압력·Pulse·Speed를 계산할 때 맞추는 중량(목표 대비 %)입니다. 적합 범위({adjustRange(batch)[0]}~{adjustRange(batch)[1]}%) 안에서 약액부와 기저부를
           따로 정할 수 있고, 적합 판정 기준은 바뀌지 않습니다.
         </p>
       )}

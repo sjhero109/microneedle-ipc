@@ -13,8 +13,8 @@ import {
   type ModelParams,
   type Recommendation,
 } from '../engine'
-import type { Batch, DbState, DispenserId, IpcRecord, MaterialType } from './types'
-import { DISPENSERS, adjustOf, materialOf, shotsOf, targetOf } from './types'
+import type { Batch, Control, DbState, DispenserId, DoePrior, IpcRecord, MaterialType } from './types'
+import { DISPENSERS, adjustOf, controlOf, doeOf, materialOf, shotsOf, stepOf, targetOf } from './types'
 
 /** 계산식에 넣지 않는 기록: 관리자가 제외했거나 테스트로 남긴 기록 */
 export const unused = (r: Pick<IpcRecord, 'excluded' | 'test'>) => r.excluded || r.test === true
@@ -53,29 +53,48 @@ function groupByBatch(records: IpcRecord[]): IpcPoint[][] {
   return [...groups.values()].map((g) => g.sort((a, b) => a.seq - b.seq).map(toPoint))
 }
 
+export const recordControl = (r: Pick<IpcRecord, 'control'>): Control => r.control ?? 'pulse'
+
 export interface PriorInfo {
   params: ModelParams
   /** 사전값을 어디서 구했는지 */
-  basis: 'same-material' | 'same-dispenser' | 'default'
+  basis: 'same-material' | 'same-dispenser' | 'doe' | 'default'
   batches: number
+}
+
+/** DOE 감도와 기준 압력이 모두 있어야 계산식의 출발점으로 쓴다 */
+export const doeReady = (d: DoePrior): d is DoePrior & { k: number; p0: number } => d.k !== null && d.k > 0 && d.p0 !== null && d.p0 > 0
+
+/**
+ * DOE에서 구한 사전값: 기준 압력 p0에서 목표 중량이 나오고, 압력 1 MPa당 k mg씩 변한다고 보고 시작한다.
+ * 잡음 크기는 기본값을 쓰고, 이번 배치 IPC가 쌓이면 수준과 감도가 고쳐진다
+ */
+export function doeParams(target: number, d: DoePrior & { k: number; p0: number }, shotsRef = 1): ModelParams {
+  return { ...defaultParams(target, d.p0, shotsRef), b: d.k, bReliable: true }
 }
 
 /**
  * 과거 전체 데이터에서 사전값을 구한다.
- * 같은 토출기·같은 물질 → 같은 토출기·다른 물질 → 기본값 순으로 넓힌다.
+ * 같은 토출기·같은 물질 → 같은 토출기·다른 물질 → (압력 방식이면) DOE → 기본값 순으로 넓힌다.
+ * 과거 기록은 이 배치와 조절 방식이 같은 것만 쓴다. Pulse 기록으로 압력 감도를 구할 수는 없다
  */
 export function priorFor(db: DbState, batch: Batch, dispenserId: DispenserId, firstPulse: number): PriorInfo {
   const type = DISPENSERS.find((d) => d.id === dispenserId)!.type
   const target = targetOf(batch, type)
-  const fallback = defaultParams(target, firstPulse, shotsOf(batch, type))
-  const past = db.records.filter((r) => r.dispenserId === dispenserId && r.batchId !== batch.id)
+  const control = controlOf(batch)
+  const doe = control === 'pressure' ? doeOf(db, dispenserId) : null
+  const fromDoe = doe && doeReady(doe) ? doeParams(target, doe, shotsOf(batch, type)) : null
+  const fallback = fromDoe ?? defaultParams(target, firstPulse, shotsOf(batch, type))
+  // 기록으로 감도를 믿을 만큼 구하지 못했으면 DOE 감도를 쓴다
+  const withDoe = (p: ModelParams) => (fromDoe && !p.bReliable ? { ...p, b: fromDoe.b, bReliable: true } : p)
+  const past = db.records.filter((r) => r.dispenserId === dispenserId && r.batchId !== batch.id && recordControl(r) === control)
   const same = groupByBatch(past.filter((r) => r.materialName === materialOf(batch, type)))
   let params = fitParams(same, fallback)
-  if (params.source === 'history') return { params, basis: 'same-material', batches: same.length }
+  if (params.source === 'history') return { params: withDoe(params), basis: 'same-material', batches: same.length }
   const any = groupByBatch(past)
   params = fitParams(any, fallback)
-  if (params.source === 'history') return { params, basis: 'same-dispenser', batches: any.length }
-  return { params: fallback, basis: 'default', batches: 0 }
+  if (params.source === 'history') return { params: withDoe(params), basis: 'same-dispenser', batches: any.length }
+  return { params: fallback, basis: fromDoe ? 'doe' : 'default', batches: 0 }
 }
 
 export interface Verdict {
@@ -92,6 +111,9 @@ export function evaluate(batch: Batch, type: MaterialType, weight: number): Verd
 
 export interface DispenserView {
   type: MaterialType
+  control: Control
+  /** 압력 방식에서 DOE로 정한 값 (Pulse 방식이면 null) */
+  doe: DoePrior | null
   target: number
   shots: number
   records: IpcRecord[]
@@ -125,7 +147,11 @@ export function dispenserView(db: DbState, batch: Batch, dispenserId: DispenserI
   const trayInterval = gaps.length ? median(gaps) : 0
   const target = targetOf(batch, type)
   // 이번 배치 기록이 아직 없어도, 과거 기록이 있으면 그 기준으로 시작 Pulse를 추천한다
-  const pulseNow = used.at(-1)?.pulse ?? (prior.basis === 'default' ? null : roundTo(prior.params.pRef, batch.pulseStep))
+  const step = stepOf(batch)
+  const control = controlOf(batch)
+  const doe = control === 'pressure' ? doeOf(db, dispenserId) : null
+  // 압력 방식은 DOE 기준 압력에서 시작할 수 있다
+  const pulseNow = used.at(-1)?.pulse ?? (prior.basis === 'default' ? null : roundTo(prior.params.pRef, step))
   const recommendation =
     pulseNow !== null
     ? recommend({
@@ -135,8 +161,10 @@ export function dispenserView(db: DbState, batch: Batch, dispenserId: DispenserI
         target,
         adjustPct: adjustOf(batch, type),
         trayInterval,
-        pulseStep: batch.pulseStep,
+        pulseStep: step,
+        pulseMin: doe?.pMin ?? undefined,
+        pulseMax: doe?.pMax ?? undefined,
       })
     : null
-  return { type, target, shots: shotsOf(batch, type), records, prior, model, recommendation, trayInterval, pulseNow, usedCount: used.length }
+  return { type, control, doe, target, shots: shotsOf(batch, type), records, prior, model, recommendation, trayInterval, pulseNow, usedCount: used.length }
 }

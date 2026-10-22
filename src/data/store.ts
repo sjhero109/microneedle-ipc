@@ -4,8 +4,8 @@ import { classify, isPass } from '../engine'
 import { localBackend, newId, type AuditDraft, type Backend, type Write } from './backend'
 import { firebaseEnabled } from './firebase'
 import { batchRecords, dispenserView, evaluate } from './model'
-import type { Actor, Batch, Correction, DbState, DispenserId, IpcRecord, Recipe, UserProfile } from './types'
-import { CONTENT_MAX, CONTENT_MIN, DISPENSERS, IDLE_MAX, IDLE_MIN, adjustOf, adjustRange, idleMinutesOf, baseTargetOf, contentOf, materialOf, shotsOf, targetForContent, targetOf } from './types'
+import type { Actor, Batch, Control, Correction, DbState, DispenserId, DoePrior, IpcRecord, Recipe, UserProfile } from './types'
+import { CONTENT_MAX, CONTENT_MIN, DISPENSERS, EMPTY_DOE, IDLE_MAX, IDLE_MIN, adjustOf, adjustRange, controlOf, doeOf, idleMinutesOf, baseTargetOf, contentOf, materialOf, shotsOf, targetForContent, targetOf } from './types'
 
 const EMPTY: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [], settings: [] }
 
@@ -174,6 +174,8 @@ export async function startBatch(actor: Actor, input: BatchInput): Promise<strin
     passLowPct: recipe.passLowPct,
     passHighPct: recipe.passHighPct,
     pulseStep: recipe.pulseStep,
+    control: controlOf(recipe),
+    ...(recipe.pressureStep !== undefined ? { pressureStep: recipe.pressureStep } : {}),
     status: 'open',
     createdAt: Date.now(),
     createdBy: actor.uid,
@@ -221,6 +223,41 @@ export async function saveIdleMinutes(actor: Actor, minutes: number) {
   if (before === minutes) return
   const data = { idleMinutes: minutes, updatedAt: Date.now(), updatedBy: actor.uid, updatedByName: actor.name }
   await commit([{ col: 'settings', id: 'app', data }], [audit(actor, '자동 로그아웃 시간 변경', 'settings', 'app', { before: { idleMinutes: before }, after: { idleMinutes: minutes } })])
+}
+
+/**
+ * DOE(압력 응답 시험) 결과를 토출기별로 저장한다. 압력 방식 배치에서 과거 기록이 부족할 때 계산식의 출발점이 되고,
+ * 추천 압력은 pMin~pMax 안으로 자른다
+ */
+export async function saveDoe(actor: Actor, next: Partial<Record<DispenserId, DoePrior>>, reason: string) {
+  requireAdmin(actor)
+  if (!reason.trim()) throw new Error('변경 사유를 입력하세요.')
+  const dispensers = {} as Record<DispenserId, DoePrior>
+  for (const d of DISPENSERS) {
+    const v = { ...EMPTY_DOE, ...next[d.id] }
+    for (const k of ['k', 'p0', 'pMin', 'pMax'] as const) {
+      const x = v[k]
+      if (x !== null && !(x > 0)) throw new Error(`${d.id}: 감도·압력은 0보다 큰 값으로 입력하세요.`)
+    }
+    if (v.p0 !== null && v.p0 > 1) throw new Error(`${d.id}: 압력은 MPa 단위로 입력하세요 (예: 0.36).`)
+    if (v.pMin !== null && v.pMax !== null && !(v.pMin < v.pMax)) throw new Error(`${d.id}: 압력 하한은 상한보다 작아야 합니다.`)
+    if (v.p0 !== null && ((v.pMin !== null && v.p0 < v.pMin) || (v.pMax !== null && v.p0 > v.pMax))) throw new Error(`${d.id}: 기준 압력이 압력 범위 밖입니다.`)
+    if (v.settle !== null && !(Number.isInteger(v.settle) && v.settle >= 0 && v.settle <= 20)) throw new Error(`${d.id}: 버림 토출 횟수는 0~20 사이의 정수로 입력하세요.`)
+    dispensers[d.id] = v
+  }
+  const before = Object.fromEntries(DISPENSERS.map((d) => [d.id, doeOf(state, d.id)]))
+  const data = { dispensers, updatedAt: Date.now(), updatedBy: actor.uid, updatedByName: actor.name }
+  await commit([{ col: 'settings', id: 'doe', data }], [audit(actor, 'DOE 값 변경', 'settings', 'doe', { before, after: dispensers, reason })])
+}
+
+/** 진행 중인 배치의 조절 방식(압력·Pulse)을 바꾼다. 관리자만 할 수 있다 */
+export async function setBatchControl(actor: Actor, id: string, control: Control) {
+  requireAdmin(actor)
+  const batch = state.batches.find((b) => b.id === id)
+  if (!batch) throw new Error('배치를 찾을 수 없습니다.')
+  if (batch.status === 'closed') throw new Error('완료된 배치입니다.')
+  if (controlOf(batch) === control) return
+  await commit([{ col: 'batches', id, data: { control } }], [audit(actor, '조절 방식 변경', 'batches', id, { before: { control: controlOf(batch) }, after: { control, batchNo: batch.batchNo } })])
 }
 
 /** 배치의 테스트 모드를 켜고 끈다. 모든 사용자에게 같은 상태로 보인다 */
@@ -379,7 +416,10 @@ export async function includeTestRecords(actor: Actor, recordIds: string[]) {
 
 export interface IpcInput {
   tray: number
+  /** 조절값: 압력 방식이면 압력(MPa), 아니면 Pulse·Speed(ms) */
   pulse: number
+  /** 압력 방식에서 고정해 둔 Pulse·Speed(ms). 기록용 */
+  pulseMs?: number
   totalWeight: number
   phase: Phase
   /** 테스트 기록: 계산식에 반영하지 않는다 */
@@ -415,6 +455,8 @@ function buildRecord(
     seq,
     tray: input.tray,
     pulse: input.pulse,
+    control: controlOf(batch),
+    ...(input.pulseMs !== undefined ? { pulseMs: input.pulseMs } : {}),
     shots,
     totalWeight: input.totalWeight,
     weight,

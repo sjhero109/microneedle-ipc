@@ -180,9 +180,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 관리자가 정하는 앱 설정 (자동 로그아웃 시간)
+    // 관리자가 정하는 앱 설정 (자동 로그아웃 시간, DOE 값)
     match /settings/{id} {
       allow read: if active();
+      // DOE(압력 응답 시험)에서 구한 토출기별 감도·기준 압력·압력 범위
+      allow create, update: if admin() && audited() && id == 'doe'
+        && request.resource.data.keys().hasOnly(['dispensers', 'updatedAt', 'updatedBy', 'updatedByName', 'auditId'])
+        && request.resource.data.dispensers is map
+        && request.resource.data.dispensers.keys().hasOnly(['D1', 'D2', 'D3', 'B1', 'B2'])
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
       allow create, update: if admin() && audited() && id == 'app'
         && request.resource.data.keys().hasOnly(['idleMinutes', 'updatedAt', 'updatedBy', 'updatedByName', 'auditId'])
         && request.resource.data.idleMinutes is int
@@ -222,6 +229,11 @@ service cloud.firestore {
         && request.resource.data.get('drugTarget', 1) is number
         && request.resource.data.get('drugTarget', 1) > 0
         && (resource.data.get('status', 'open') != 'closed' || request.resource.data.status == 'open');
+      // 진행 중인 배치의 조절 방식(압력·Pulse)은 관리자만 바꾼다
+      allow update: if admin() && audited()
+        && onlyChanges(['control', 'auditId'])
+        && request.resource.data.control in ['pulse', 'pressure']
+        && resource.data.get('status', 'open') != 'closed';
       // 관리자는 완료된 배치라도 배치번호·제조일자·약액부명·기저부명을 고칠 수 있다
       allow update: if admin() && audited()
         && onlyChanges(['batchNo', 'mfgDate', 'drugName', 'baseName', 'auditId'])

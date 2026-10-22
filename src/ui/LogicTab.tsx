@@ -6,7 +6,7 @@ import { DEFAULT_CRITERIA, DISPENSERS, adjustOf } from '../data/types'
 import { walkForward } from '../engine'
 import { Panel, Select, fmt } from './common'
 
-const BASIS = { 'same-material': '같은 토출기·같은 물질', 'same-dispenser': '같은 토출기·다른 물질', default: '기본값 (기록 없음)' } as const
+const BASIS = { 'same-material': '같은 토출기·같은 물질', 'same-dispenser': '같은 토출기·다른 물질', doe: 'DOE 값 (압력 기록 없음)', default: '기본값 (기록 없음)' } as const
 
 function Formula({ children }: { children: string }) {
   return <div className="num my-2 rounded-lg bg-sunken px-3 py-2 font-mono text-sm">{children}</div>
@@ -58,6 +58,14 @@ export function LogicTab({ batch }: { batch: Batch | null }) {
           <li>
             <b>토출 중 감소량</b>은 같은 Pulse로 이어진 IPC 두 건의 중량 차이를 트레이 수로 나눠 구합니다. 과거 기록에서 통계적으로 확인될 때만 쓰고,
             현재 배치에서 적합 뒤 다음 IPC 값이 쌓이면 그 값으로 고쳐 갑니다.
+          </li>
+          <li>
+            <b>압력 방식.</b> 레시피·배치의 조절 방식이 "압력"이면 Pulse·Speed·Rising·Falling·온도는 고정하고 공급 압력(MPa)만 바꿉니다. 위 식의 Pulse 자리에
+            압력이 들어가고, 감도 b는 압력 1 MPa당 중량 변화(mg)입니다.
+            <Formula>{`추천 압력 = 현재 압력 + (목표 × ${adjust}% − 현재 추정 중량) ÷ 감도 b`}</Formula>
+            과거 기록은 조절 방식이 같은 것만 씁니다. 압력 기록이 아직 없으면 관리자가 입력한 DOE(압력 응답 시험) 값, 즉 토출기별 감도 k와 목표 중량이 나오는
+            기준 압력에서 시작하고, 기록으로 감도를 믿을 만큼 구하지 못하면 DOE 감도를 씁니다. 추천 압력은 압력 조절 단위(기본 0.001 MPa)로 반올림하고,
+            DOE 압력 범위 밖으로 나가면 끝값으로 자른 뒤 알립니다. 압력을 바꾼 뒤에는 DOE에서 정한 버림 토출 횟수를 안내합니다.
           </li>
           <li>
             <b>예상 범위를 크게 벗어난 값</b>(예측 오차가 3σ 초과)은 "재측정 권장"으로 표시하고 반영 비율을 낮춥니다. 계산에서 완전히 빼는 것은 관리자가

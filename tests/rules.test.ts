@@ -451,6 +451,29 @@ describe('앱 설정', () => {
     await assertSucceeds(withAudit('admin', 'settings/app', idle('admin', 30)))
     await assertSucceeds(getDoc(doc(as('user'), 'settings', 'app')))
   })
+
+  it('DOE 값은 관리자만 토출기별로 저장한다', async () => {
+    const row = { k: 70, p0: 0.36, pMin: 0.32, pMax: 0.39, settle: 1 }
+    const doe = (who: Who, dispensers: Record<string, unknown>) => ({ dispensers, updatedAt: serverTimestamp(), updatedBy: who === 'admin' ? 'admin1' : 'user1', updatedByName: '이름' })
+    await assertSucceeds(withAudit('admin', 'settings/doe', doe('admin', { D1: row, B1: { ...row, k: null } })))
+    await assertFails(withAudit('user', 'settings/doe', doe('user', { D1: row })))
+    await assertFails(withAudit('admin', 'settings/doe', doe('admin', { D9: row })))
+    await assertFails(withAudit('admin', 'settings/doe', { ...doe('admin', { D1: row }), idleMinutes: 30 }))
+    await assertSucceeds(getDoc(doc(as('user'), 'settings', 'doe')))
+  })
+})
+
+describe('조절 방식', () => {
+  it('진행 중인 배치의 조절 방식은 관리자만 바꾼다', async () => {
+    await assertFails(withAudit('user', 'batches/batch1', { control: 'pressure' }, { merge: true }))
+    await assertSucceeds(withAudit('admin', 'batches/batch1', { control: 'pressure' }, { merge: true }))
+    await assertFails(withAudit('admin', 'batches/batch1', { control: 'speed' }, { merge: true }))
+    await assertFails(withAudit('admin', 'batches/batch1', { control: 'pulse', shots: 9 }, { merge: true }))
+  })
+
+  it('압력 기록은 조절값·조절 방식·고정 Pulse와 함께 저장된다', async () => {
+    await assertSucceeds(withAudit('user', `records/${id('rec')}`, record('user', { pulse: 0.362, control: 'pressure', pulseMs: 1.3 })))
+  })
 })
 
 describe('배치 완료', () => {

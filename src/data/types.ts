@@ -3,6 +3,8 @@ import type { Band, Phase } from '../engine'
 export type DispenserId = 'D1' | 'D2' | 'D3' | 'B1' | 'B2'
 export type MaterialType = 'drug' | 'base'
 export type Role = 'user' | 'admin'
+/** 조절 방식: 토출기에서 무엇을 바꿔 중량을 맞추는지. 예전 기록·배치에는 값이 없고 Pulse로 본다 */
+export type Control = 'pulse' | 'pressure'
 
 export const DISPENSERS: { id: DispenserId; label: string; type: MaterialType }[] = [
   { id: 'D1', label: '약액부 토출기 1', type: 'drug' },
@@ -32,6 +34,10 @@ export interface Criteria {
   passHighPct: number
   /** Pulse·Speed 최소 조정 단위 */
   pulseStep: number
+  /** 조절 방식. 없으면 Pulse */
+  control?: Control
+  /** 압력 최소 조정 단위(MPa). 없으면 0.001 */
+  pressureStep?: number
 }
 
 export interface Recipe extends Criteria {
@@ -96,7 +102,12 @@ export interface IpcRecord {
   /** 같은 배치·토출기 안에서의 입력 순서 */
   seq: number
   tray: number
+  /** 조절값: 조절 방식이 압력이면 공급 압력(MPa), 아니면 Pulse·Speed(ms). 필드 이름은 예전 그대로 둔다 */
   pulse: number
+  /** 이 기록의 조절 방식. 없으면 Pulse */
+  control?: Control
+  /** 압력 방식에서 고정해 둔 Pulse·Speed(ms). 추적용으로만 남긴다 */
+  pulseMs?: number
   shots: number
   /** 측정한 합산 중량(mg) */
   totalWeight: number
@@ -110,7 +121,7 @@ export interface IpcRecord {
   devPct: number
   band: Band
   pass: boolean
-  /** 저장 당시 추천 Pulse와 모델 값 (추적용) */
+  /** 저장 당시 추천 조절값(Pulse 또는 압력)과 모델 값 (추적용) */
   recommendedPulse: number | null
   model: { level: number; b: number; drift: number; gain: number; source: string } | null
   outlier: boolean
@@ -128,7 +139,7 @@ export interface IpcRecord {
 }
 
 /** 정정할 수 있는 항목의 이름 */
-export const CORRECTION_LABEL = { tray: '트레이번호', pulse: 'Pulse·Speed', totalWeight: '합산 중량' } as const
+export const CORRECTION_LABEL = { tray: '트레이번호', pulse: '설정값(압력·Pulse·Speed)', totalWeight: '합산 중량' } as const
 
 export interface Correction {
   id: string
@@ -207,11 +218,41 @@ export const IDLE_MIN = 5
 export const IDLE_MAX = 720
 
 export function idleMinutesOf(db: Pick<DbState, 'settings'>): number {
-  return db.settings.find((s) => s.id === 'app')?.idleMinutes ?? IDLE_DEFAULT
+  return db.settings.find((s): s is AppSettings => s.id === 'app')?.idleMinutes ?? IDLE_DEFAULT
+}
+
+/**
+ * DOE(압력 응답 시험)에서 구한 토출기별 값. 압력 방식에서 과거 기록이 부족할 때 계산식의 출발점이 된다.
+ * 감도 k는 압력 1 MPa당 1회 토출 중량 변화(mg)이다
+ */
+export interface DoePrior {
+  k: number | null
+  /** 목표 중량이 나오는 압력(MPa) */
+  p0: number | null
+  /** 맺힘 없이 쓸 수 있는 압력 범위(MPa). 추천 압력은 이 안으로 자른다 */
+  pMin: number | null
+  pMax: number | null
+  /** 압력을 바꾼 뒤 IPC 전에 버리는 토출 횟수 */
+  settle: number | null
+}
+
+export interface DoeSettings {
+  id: 'doe'
+  dispensers: Partial<Record<DispenserId, DoePrior>>
+  updatedAt: number
+  updatedBy: string
+  updatedByName: string
+}
+
+export const EMPTY_DOE: DoePrior = { k: null, p0: null, pMin: null, pMax: null, settle: null }
+
+export function doeOf(db: Pick<DbState, 'settings'>, id: DispenserId): DoePrior {
+  const doc = db.settings.find((s): s is DoeSettings => s.id === 'doe')
+  return { ...EMPTY_DOE, ...doc?.dispensers[id] }
 }
 
 export interface DbState {
-  settings: AppSettings[]
+  settings: (AppSettings | DoeSettings)[]
   recipes: Recipe[]
   batches: Batch[]
   records: IpcRecord[]
@@ -246,7 +287,21 @@ export function contentOf(batch: Batch, recipe?: Pick<Recipe, 'drugTarget'>): nu
 export const paramName = (type: MaterialType) => (type === 'drug' ? 'Pulse' : 'Speed')
 
 /** Pulse·Speed의 단위 */
-export const PARAM_UNIT = 'm/s'
+export const PARAM_UNIT = 'ms'
+
+export const PRESSURE_UNIT = 'MPa'
+export const PRESSURE_STEP_DEFAULT = 0.001
+
+export const controlOf = (c: { control?: Control }): Control => c.control ?? 'pulse'
+
+/** 조절값의 이름: 압력 방식이면 "압력", 아니면 Pulse·Speed */
+export const ctrlName = (control: Control, type: MaterialType) => (control === 'pressure' ? '압력' : paramName(type))
+export const ctrlUnit = (control: Control) => (control === 'pressure' ? PRESSURE_UNIT : PARAM_UNIT)
+
+/** 추천 조절값을 반올림하는 단위 */
+export function stepOf(c: Pick<Criteria, 'control' | 'pulseStep' | 'pressureStep'>): number {
+  return controlOf(c) === 'pressure' ? (c.pressureStep ?? PRESSURE_STEP_DEFAULT) : c.pulseStep
+}
 
 export const DEFAULT_CRITERIA: Criteria = {
   bands: [2, 5, 10],
@@ -255,6 +310,8 @@ export const DEFAULT_CRITERIA: Criteria = {
   passLowPct: -5,
   passHighPct: 5,
   pulseStep: 0.001,
+  control: 'pressure',
+  pressureStep: PRESSURE_STEP_DEFAULT,
 }
 
 /**

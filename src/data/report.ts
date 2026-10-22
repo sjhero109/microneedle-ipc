@@ -1,5 +1,5 @@
 import type { Batch, DispenserId, IpcRecord } from './types'
-import { DISPENSERS, paramName, targetOf } from './types'
+import { DISPENSERS, controlOf, ctrlName, targetOf } from './types'
 import { trayLabels, unused } from './model'
 
 /** 편차 구간: 2/5/10% 경계 (배치 기준값) */
@@ -104,7 +104,7 @@ export function dispenserStats(batch: Batch, records: IpcRecord[], id: Dispenser
   return {
     id,
     type: d.type,
-    param: paramName(d.type),
+    param: ctrlName(controlOf(batch), d.type),
     target: targetOf(batch, d.type),
     used,
     all,

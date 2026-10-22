@@ -35,6 +35,7 @@ export function TrendChart({
   passLow,
   passHigh,
   paramLabel = 'Pulse',
+  unit = PARAM_UNIT,
 }: {
   points: TrendPoint[]
   /** 지금의 목표 중량(1회분 mg). 기준선 옆에 중량으로 적는다 */
@@ -42,8 +43,10 @@ export function TrendChart({
   adjustPct: number
   passLow: number
   passHigh: number
-  /** 파라미터 이름: 약액부 Pulse, 기저부 Speed */
+  /** 파라미터 이름: 약액부 Pulse, 기저부 Speed, 압력 방식이면 압력 */
   paramLabel?: string
+  /** 조절값 단위: ms 또는 MPa */
+  unit?: string
 }) {
   const [hover, setHover] = useState<number | null>(null)
   if (points.length === 0) return null
@@ -193,7 +196,7 @@ export function TrendChart({
             </div>
           )}
           <div className="num">
-            {paramLabel} {h.pulse} {PARAM_UNIT}
+            {paramLabel} {h.pulse} {unit}
           </div>
           {h.test ? <div>테스트 기록 (계산에 미반영)</div> : h.excluded && <div>계산에서 제외됨</div>}
         </div>
