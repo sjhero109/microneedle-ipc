@@ -464,15 +464,17 @@ describe('앱 설정', () => {
 })
 
 describe('조절 방식', () => {
-  it('진행 중인 배치의 조절 방식은 관리자만 바꾼다', async () => {
-    await assertFails(withAudit('user', 'batches/batch1', { control: 'pressure' }, { merge: true }))
-    await assertSucceeds(withAudit('admin', 'batches/batch1', { control: 'pressure' }, { merge: true }))
-    await assertFails(withAudit('admin', 'batches/batch1', { control: 'speed' }, { merge: true }))
-    await assertFails(withAudit('admin', 'batches/batch1', { control: 'pulse', shots: 9 }, { merge: true }))
+  it('조절 방식과 고정값은 배치 정보에서 작업자도 바꾼다', async () => {
+    const fixed = { D1: { pulse: 1.3, pressure: 0.36 }, D2: { pulse: null, pressure: 0.4 } }
+    await assertSucceeds(withAudit('user', 'batches/batch1', { control: 'pressure', fixed }, { merge: true }))
+    await assertSucceeds(withAudit('user', 'batches/batch1', { control: 'pulse' }, { merge: true }))
+    await assertFails(withAudit('user', 'batches/batch1', { control: 'speed' }, { merge: true }))
+    await assertFails(withAudit('user', 'batches/batch1', { fixed: 'D1 1.3' }, { merge: true }))
   })
 
   it('압력 기록은 조절값·조절 방식·고정 Pulse와 함께 저장된다', async () => {
     await assertSucceeds(withAudit('user', `records/${id('rec')}`, record('user', { pulse: 0.362, control: 'pressure', pulseMs: 1.3 })))
+    await assertSucceeds(withAudit('user', `records/${id('rec')}`, record('user', { pulse: 12, control: 'pulse', pressureMpa: 0.36 })))
   })
 })
 

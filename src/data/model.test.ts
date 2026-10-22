@@ -119,3 +119,16 @@ describe('압력 방식 추천', () => {
     expect(v.prior.basis).toBe('default')
   })
 })
+
+describe('방식 병용 (세팅 단계)', () => {
+  it('배치 안에서 방식을 바꾸면 그 방식의 기록만으로 추정한다', () => {
+    const pulseRecs = [rec(12, 5.2, { control: 'pulse' }), rec(13, 5.6, { control: 'pulse' })]
+    const v = dispenserView(db([...pulseRecs, rec(0.36, 5.5)]), batch, 'D1')
+    expect(v.otherModeCount).toBe(2)
+    expect(v.usedCount).toBe(1)
+    expect(v.recommendation?.pulse).toBe(0.368)
+    // 다른 방식 기록에는 추정 수준을 그리지 않는다
+    expect(v.levels.has(pulseRecs[0].id)).toBe(false)
+    expect(v.levels.size).toBe(1)
+  })
+})

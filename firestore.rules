@@ -213,7 +213,10 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time;
       // 완료된 배치는 다시 여는 것만 할 수 있다 (작업자도 가능). 연 뒤에야 내용을 고칠 수 있다
       allow update: if active() && audited()
-        && onlyChanges(['drugName', 'baseName', 'shots', 'mfgDate', 'drugTarget', 'contentPct', 'drugTargetBase', 'drugAdjustPct', 'baseAdjustPct', 'testMode', 'testModeBy', 'testModeByName', 'testModeAt', 'status', 'closedAt', 'closedBy', 'closedByName', 'auditId'])
+        && onlyChanges(['drugName', 'baseName', 'shots', 'mfgDate', 'drugTarget', 'contentPct', 'drugTargetBase', 'drugAdjustPct', 'baseAdjustPct', 'testMode', 'testModeBy', 'testModeByName', 'testModeAt', 'status', 'closedAt', 'closedBy', 'closedByName', 'control', 'fixed', 'auditId'])
+        // 조절 방식(압력·Pulse)과 조절하지 않는 쪽의 고정값은 세팅 중 작업자가 바꾼다
+        && request.resource.data.get('control', 'pulse') in ['pulse', 'pressure']
+        && request.resource.data.get('fixed', {}) is map
         // 약액부 목표 중량은 함량에 따라 배치 중에도 바뀐다
         && request.resource.data.get('contentPct', 100) is number
         && request.resource.data.get('contentPct', 100) > 0
@@ -229,11 +232,6 @@ service cloud.firestore {
         && request.resource.data.get('drugTarget', 1) is number
         && request.resource.data.get('drugTarget', 1) > 0
         && (resource.data.get('status', 'open') != 'closed' || request.resource.data.status == 'open');
-      // 진행 중인 배치의 조절 방식(압력·Pulse)은 관리자만 바꾼다
-      allow update: if admin() && audited()
-        && onlyChanges(['control', 'auditId'])
-        && request.resource.data.control in ['pulse', 'pressure']
-        && resource.data.get('status', 'open') != 'closed';
       // 관리자는 완료된 배치라도 배치번호·제조일자·약액부명·기저부명을 고칠 수 있다
       allow update: if admin() && audited()
         && onlyChanges(['batchNo', 'mfgDate', 'drugName', 'baseName', 'auditId'])

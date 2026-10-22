@@ -4,7 +4,7 @@ import { classify, isPass } from '../engine'
 import { localBackend, newId, type AuditDraft, type Backend, type Write } from './backend'
 import { firebaseEnabled } from './firebase'
 import { batchRecords, dispenserView, evaluate } from './model'
-import type { Actor, Batch, Control, Correction, DbState, DispenserId, DoePrior, IpcRecord, Recipe, UserProfile } from './types'
+import type { Actor, Batch, Correction, DbState, DispenserId, DoePrior, IpcRecord, Recipe, UserProfile } from './types'
 import { CONTENT_MAX, CONTENT_MIN, DISPENSERS, EMPTY_DOE, IDLE_MAX, IDLE_MIN, adjustOf, adjustRange, controlOf, doeOf, idleMinutesOf, baseTargetOf, contentOf, materialOf, shotsOf, targetForContent, targetOf } from './types'
 
 const EMPTY: DbState = { recipes: [], batches: [], records: [], corrections: [], audit: [], users: [], guards: [], settings: [] }
@@ -191,11 +191,15 @@ function checkContent(contentPct: number) {
 export async function updateBatch(
   actor: Actor,
   id: string,
-  patch: Partial<Pick<Batch, 'drugName' | 'baseName' | 'shots' | 'mfgDate' | 'contentPct' | 'drugAdjustPct' | 'baseAdjustPct' | 'status'>>,
+  patch: Partial<Pick<Batch, 'drugName' | 'baseName' | 'shots' | 'mfgDate' | 'contentPct' | 'drugAdjustPct' | 'baseAdjustPct' | 'status' | 'control' | 'fixed'>>,
 ) {
   const before = state.batches.find((b) => b.id === id)
   if (!before) throw new Error('배치를 찾을 수 없습니다.')
   const next: Partial<Batch> = { ...patch }
+  for (const [d, f] of Object.entries(patch.fixed ?? {})) {
+    if (f.pulse !== null && !(f.pulse > 0)) throw new Error(`${d}: 고정 Pulse·Speed는 0보다 커야 합니다.`)
+    if (f.pressure !== null && !(f.pressure > 0 && f.pressure <= 1)) throw new Error(`${d}: 고정 압력은 MPa 단위(0~1)로 입력하세요.`)
+  }
   const [lo, hi] = adjustRange(before)
   for (const v of [patch.drugAdjustPct, patch.baseAdjustPct]) {
     if (v !== undefined && !(v >= lo && v <= hi)) throw new Error(`조정 목표는 적합 범위(${lo}~${hi}%) 안에서 입력하세요.`)
@@ -209,7 +213,8 @@ export async function updateBatch(
   }
   // 조정 목표는 따로 정한 적이 없으면 레시피 값과 비교한다
   const current = { ...before, drugAdjustPct: adjustOf(before, 'drug'), baseAdjustPct: adjustOf(before, 'base') }
-  const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => current[k as keyof Batch] !== v))
+  const same = (k: string, v: unknown) => (k === 'fixed' ? JSON.stringify(current.fixed ?? {}) === JSON.stringify(v) : k === 'control' ? controlOf(current) === v : current[k as keyof Batch] === v)
+  const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => !same(k, v)))
   if (Object.keys(changed).length === 0) return
   const prev = Object.fromEntries(Object.keys(changed).map((k) => [k, current[k as keyof Batch]]))
   await commit([{ col: 'batches', id, data: changed }], [audit(actor, '배치 정보 변경', 'batches', id, { before: prev, after: changed })])
@@ -248,16 +253,6 @@ export async function saveDoe(actor: Actor, next: Partial<Record<DispenserId, Do
   const before = Object.fromEntries(DISPENSERS.map((d) => [d.id, doeOf(state, d.id)]))
   const data = { dispensers, updatedAt: Date.now(), updatedBy: actor.uid, updatedByName: actor.name }
   await commit([{ col: 'settings', id: 'doe', data }], [audit(actor, 'DOE 값 변경', 'settings', 'doe', { before, after: dispensers, reason })])
-}
-
-/** 진행 중인 배치의 조절 방식(압력·Pulse)을 바꾼다. 관리자만 할 수 있다 */
-export async function setBatchControl(actor: Actor, id: string, control: Control) {
-  requireAdmin(actor)
-  const batch = state.batches.find((b) => b.id === id)
-  if (!batch) throw new Error('배치를 찾을 수 없습니다.')
-  if (batch.status === 'closed') throw new Error('완료된 배치입니다.')
-  if (controlOf(batch) === control) return
-  await commit([{ col: 'batches', id, data: { control } }], [audit(actor, '조절 방식 변경', 'batches', id, { before: { control: controlOf(batch) }, after: { control, batchNo: batch.batchNo } })])
 }
 
 /** 배치의 테스트 모드를 켜고 끈다. 모든 사용자에게 같은 상태로 보인다 */
@@ -420,6 +415,8 @@ export interface IpcInput {
   pulse: number
   /** 압력 방식에서 고정해 둔 Pulse·Speed(ms). 기록용 */
   pulseMs?: number
+  /** Pulse 방식에서 고정해 둔 압력(MPa). 기록용 */
+  pressureMpa?: number
   totalWeight: number
   phase: Phase
   /** 테스트 기록: 계산식에 반영하지 않는다 */
@@ -457,6 +454,7 @@ function buildRecord(
     pulse: input.pulse,
     control: controlOf(batch),
     ...(input.pulseMs !== undefined ? { pulseMs: input.pulseMs } : {}),
+    ...(input.pressureMpa !== undefined ? { pressureMpa: input.pressureMpa } : {}),
     shots,
     totalWeight: input.totalWeight,
     weight,

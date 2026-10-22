@@ -1,11 +1,30 @@
 import { useState } from 'react'
 import { useActor, useAuth } from '../data/auth'
-import { closeBatch, recordsWithOtherShots, rescaleShots, setBatchControl, startBatch, updateBatch, useDb } from '../data/store'
-import type { Batch, Control } from '../data/types'
-import { CONTENT_MAX, CONTENT_MIN, adjustOf, adjustRange, baseTargetOf, contentOf, controlOf, ctrlUnit, stepOf, targetForContent } from '../data/types'
+import { closeBatch, recordsWithOtherShots, rescaleShots, startBatch, updateBatch, useDb } from '../data/store'
+import type { Batch, Control, DispenserId, FixedSetting } from '../data/types'
+import { CONTENT_MAX, CONTENT_MIN, DISPENSERS, PARAM_UNIT, PRESSURE_UNIT, adjustOf, adjustRange, baseTargetOf, contentOf, controlOf, ctrlUnit, fixedOf, stepOf, targetForContent } from '../data/types'
 import { Button, Field, Input, NumInput, Select, fmt, parseNum } from './common'
 
 const today = () => new Date().toLocaleDateString('sv-SE')
+
+type FixedText = Record<DispenserId, { pulse: string; pressure: string }>
+const fixedText = (batch: Batch): FixedText =>
+  Object.fromEntries(
+    DISPENSERS.map((d) => {
+      const f = fixedOf(batch, d.id)
+      return [d.id, { pulse: f.pulse?.toString() ?? '', pressure: f.pressure?.toString() ?? '' }]
+    }),
+  ) as FixedText
+
+/** 배치 요약에 보일 고정값: "D1 Pulse 1.3 ms · 압력 0.36 MPa" */
+function fixedSummary(batch: Batch): string {
+  const parts = DISPENSERS.flatMap((d) => {
+    const f = fixedOf(batch, d.id)
+    const items = [f.pulse !== null ? `${d.type === 'drug' ? 'Pulse' : 'Speed'} ${f.pulse} ${PARAM_UNIT}` : '', f.pressure !== null ? `압력 ${f.pressure} ${PRESSURE_UNIT}` : ''].filter(Boolean)
+    return items.length ? [`${d.id} ${items.join(' · ')}`] : []
+  })
+  return parts.join('  |  ')
+}
 
 /** 최상단 배치 정보: 제품명(레시피), 배치번호, 제조일자, 약액부명, 기저부명, IPC 배수 */
 export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id: string | null): void }) {
@@ -27,6 +46,9 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
   const [content, setContent] = useState<string | null>(null)
   const [drugAdjust, setDrugAdjust] = useState('')
   const [baseAdjust, setBaseAdjust] = useState('')
+  // 조절 방식과, 조절하지 않는 쪽의 고정값 (토출기별)
+  const [control, setControl] = useState<Control>('pressure')
+  const [fixed, setFixed] = useState<FixedText>(() => fixedText({} as Batch))
   const batchRecipe = batch ? db.recipes.find((r) => r.id === batch.recipeId) : undefined
   const [editing, setEditing] = useState(false)
   const [closing, setClosing] = useState(false)
@@ -75,6 +97,8 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
               setDrugAdjust(String(adjustOf(batch, 'drug')))
               setBaseAdjust(String(adjustOf(batch, 'base')))
               setMfgDate(batch.mfgDate)
+              setControl(controlOf(batch))
+              setFixed(fixedText(batch))
               setEditing(true)
             }}
           >
@@ -87,28 +111,9 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
             배치 완료
           </Button>
         </div>
-        {actor.role === 'admin' && (
-          <label className="flex basis-full items-center gap-2 text-xs text-sub">
-            <span className="whitespace-nowrap">관리자: 조절 방식</span>
-            <Select
-              className="h-9 max-w-48 text-xs"
-              value={controlOf(batch)}
-              onChange={async (e) => {
-                setError('')
-                try {
-                  await confirm()
-                  await setBatchControl(actor, batch.id, e.target.value as Control)
-                  setNotice(e.target.value === 'pressure' ? '이 배치는 이제 압력을 추천합니다. 과거 Pulse 기록은 압력 계산에 쓰지 않습니다.' : '이 배치는 이제 Pulse·Speed를 추천합니다.')
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : '바꾸지 못했습니다.')
-                }
-              }}
-            >
-              <option value="pressure">압력 (MPa)</option>
-              <option value="pulse">Pulse·Speed (ms)</option>
-            </Select>
-          </label>
-        )}
+        <p className="num basis-full text-xs text-sub">
+          고정값 ({controlOf(batch) === 'pressure' ? '압력 방식: Pulse·Speed 고정' : 'Pulse 방식: 압력 고정'}) — {fixedSummary(batch) || '미입력 · "정보 수정"에서 토출기별로 입력하세요'}
+        </p>
         {notice && <p className="basis-full text-sm text-good">{notice}</p>}
         {closing && (
           <div className="flex basis-full flex-wrap items-center gap-2 rounded-lg border border-bad/40 bg-bad/5 px-3 py-2.5 text-sm">
@@ -166,8 +171,16 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
         const ba = parseNum(baseAdjust)
         if (da === null || ba === null || da < lo || da > hi || ba < lo || ba > hi) throw new Error(`조정 목표는 적합 범위(${lo}~${hi}%) 안에서 입력하세요.`)
         // 관리자가 고르면 이미 저장한 약액부 기록도 새 배수로 다시 계산한다
+        const fx = {} as Record<DispenserId, FixedSetting>
+        for (const d of DISPENSERS) {
+          const f = { pulse: fixed[d.id].pulse.trim(), pressure: fixed[d.id].pressure.trim() }
+          const pulse = f.pulse === '' ? null : parseNum(f.pulse)
+          const pressure = f.pressure === '' ? null : parseNum(f.pressure)
+          if ((f.pulse !== '' && pulse === null) || (f.pressure !== '' && pressure === null)) throw new Error(`${d.id} 고정값의 숫자를 확인하세요.`)
+          fx[d.id] = { pulse, pressure }
+        }
         if (rescale && mismatched.length) await confirm()
-        await updateBatch(actor, batch.id, { drugName: drug, baseName: base, shots: n, mfgDate, contentPct: cv, drugAdjustPct: da, baseAdjustPct: ba })
+        await updateBatch(actor, batch.id, { drugName: drug, baseName: base, shots: n, mfgDate, contentPct: cv, drugAdjustPct: da, baseAdjustPct: ba, control, fixed: fx })
         if (rescale && mismatched.length) {
           const count = await rescaleShots(actor, batch.id, n)
           setNotice(`기존 약액부 기록 ${count}건을 IPC 배수 ${n}회로 다시 계산했습니다.`)
@@ -277,6 +290,14 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
             </Field>
           </>
         )}
+        {batch && (
+          <Field label="조절 방식">
+            <Select value={control} onChange={(e) => setControl(e.target.value as Control)}>
+              <option value="pressure">압력 조절</option>
+              <option value="pulse">Pulse 조절</option>
+            </Select>
+          </Field>
+        )}
         <div className="col-span-2 flex gap-2 sm:col-span-3 lg:col-span-1">
           <Button variant="primary" onClick={submit} className="flex-1">
             {batch ? '저장' : existing ? '배치 불러오기' : '배치 시작'}
@@ -303,6 +324,29 @@ export function BatchBar({ batch, onSelect }: { batch: Batch | null; onSelect(id
           조정 목표는 추천 압력·Pulse·Speed를 계산할 때 맞추는 중량(목표 대비 %)입니다. 적합 범위({adjustRange(batch)[0]}~{adjustRange(batch)[1]}%) 안에서 약액부와 기저부를
           따로 정할 수 있고, 적합 판정 기준은 바뀌지 않습니다.
         </p>
+      )}
+      {batch && (
+        <div className="rounded-lg border border-line px-3 py-2.5">
+          <div className="text-xs font-semibold">토출기별 고정값</div>
+          <p className="mt-0.5 text-xs text-sub">
+            {control === 'pressure'
+              ? '압력 조절 방식: 압력을 추천하고, 아래 Pulse·Speed는 고정값으로 기록에 함께 남깁니다.'
+              : 'Pulse 조절 방식: Pulse·Speed를 추천하고, 아래 압력은 고정값으로 기록에 함께 남깁니다.'}{' '}
+            방식을 바꾸면 그 방식으로 저장한 기록만으로 다시 추정합니다(첫 IPC부터). 두 값을 모두 적어 두면 전환할 때 시작값으로 씁니다.
+          </p>
+          <div className="mt-2 grid grid-cols-[auto_1fr_1fr] items-center gap-x-2 gap-y-1.5 sm:max-w-xl">
+            <span />
+            <span className="text-xs text-sub">고정 Pulse·Speed ({PARAM_UNIT}){control === 'pressure' ? ' · 사용' : ''}</span>
+            <span className="text-xs text-sub">고정 압력 ({PRESSURE_UNIT}){control === 'pulse' ? ' · 사용' : ''}</span>
+            {DISPENSERS.map((d) => (
+              <div key={d.id} className="contents">
+                <span className="text-sm font-medium">{d.id}</span>
+                <NumInput className="h-9" value={fixed[d.id].pulse} onChange={(e) => setFixed({ ...fixed, [d.id]: { ...fixed[d.id], pulse: e.target.value } })} />
+                <NumInput className="h-9" value={fixed[d.id].pressure} onChange={(e) => setFixed({ ...fixed, [d.id]: { ...fixed[d.id], pressure: e.target.value } })} />
+              </div>
+            ))}
+          </div>
+        </div>
       )}
       {batch && mismatched.length > 0 && (
         <div className="rounded-lg border border-warn bg-warn/10 px-3 py-2.5 text-sm">

@@ -212,8 +212,7 @@ export function BatchReport({ batch, onClose }: { batch: Batch; onClose(): void 
     const m = new Map<string, number>()
     for (const s of report.dispensers) {
       if (!s.used.length) continue
-      const steps = dispenserView(db, batch, s.id).model.steps
-      s.used.forEach((r, i) => steps[i] && m.set(r.id, steps[i].levelAtPulse))
+      for (const [id, level] of dispenserView(db, batch, s.id).levels) m.set(id, level)
     }
     return m
   }, [db, batch, report])

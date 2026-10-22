@@ -125,6 +125,10 @@ export interface DispenserView {
   pulseNow: number | null
   /** 이번 배치에서 계산에 쓴 기록 수 */
   usedCount: number
+  /** 기록 id → 지금 계산식의 추정 수준(mg). 다른 조절 방식·제외·테스트 기록은 없다 */
+  levels: Map<string, number>
+  /** 이번 배치에서 다른 조절 방식으로 남긴 기록 수 (계산에는 쓰지 않는다) */
+  otherModeCount: number
   trayInterval: number
 }
 
@@ -133,8 +137,11 @@ export interface DispenserView {
  */
 export function dispenserView(db: DbState, batch: Batch, dispenserId: DispenserId, draft?: IpcPoint): DispenserView {
   const type = DISPENSERS.find((d) => d.id === dispenserId)!.type
+  const control = controlOf(batch)
   const records = batchRecords(db, batch.id, dispenserId)
-  const points = records.map(toPoint)
+  // 세팅 단계에서 방식을 바꾸면 그 방식의 기록만으로 다시 추정한다. ms와 MPa를 한 식에 섞을 수 없다
+  const sameMode = records.filter((r) => recordControl(r) === control)
+  const points = sameMode.map(toPoint)
   if (draft) points.push(draft)
   const used = points.filter((p) => !p.excluded)
   const prior = priorFor(db, batch, dispenserId, used[0]?.pulse ?? 1)
@@ -148,8 +155,12 @@ export function dispenserView(db: DbState, batch: Batch, dispenserId: DispenserI
   const target = targetOf(batch, type)
   // 이번 배치 기록이 아직 없어도, 과거 기록이 있으면 그 기준으로 시작 Pulse를 추천한다
   const step = stepOf(batch)
-  const control = controlOf(batch)
   const doe = control === 'pressure' ? doeOf(db, dispenserId) : null
+  const levels = new Map<string, number>()
+  sameMode.filter((r) => !unused(r)).forEach((r, i) => {
+    const s = model.steps[i]
+    if (s) levels.set(r.id, s.levelAtPulse)
+  })
   // 압력 방식은 DOE 기준 압력에서 시작할 수 있다
   const pulseNow = used.at(-1)?.pulse ?? (prior.basis === 'default' ? null : roundTo(prior.params.pRef, step))
   const recommendation =
@@ -166,5 +177,20 @@ export function dispenserView(db: DbState, batch: Batch, dispenserId: DispenserI
         pulseMax: doe?.pMax ?? undefined,
       })
     : null
-  return { type, control, doe, target, shots: shotsOf(batch, type), records, prior, model, recommendation, trayInterval, pulseNow, usedCount: used.length }
+  return {
+    type,
+    control,
+    doe,
+    target,
+    shots: shotsOf(batch, type),
+    records,
+    prior,
+    model,
+    recommendation,
+    trayInterval,
+    pulseNow,
+    usedCount: used.length,
+    levels,
+    otherModeCount: records.length - sameMode.length,
+  }
 }

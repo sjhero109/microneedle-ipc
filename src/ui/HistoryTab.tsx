@@ -212,8 +212,7 @@ function DispenserResult({ batch, dispenser, records, labels }: { batch: Batch; 
   const targets = [...new Set(used.map((r) => r.target))]
   const meanDev = used.length ? used.reduce((s, r) => s + (r.weight / r.target - 1) * 100, 0) / used.length : null
   // 추정 수준은 저장 당시 값이 아니라 지금의 계산식으로 다시 그린다
-  const steps = useMemo(() => [...dispenserView(db, batch, dispenser.id).model.steps], [db, batch, dispenser.id])
-  const levels = new Map(used.map((r, i) => [r.id, steps[i]?.levelAtPulse]))
+  const levels = useMemo(() => dispenserView(db, batch, dispenser.id).levels, [db, batch, dispenser.id])
   const fails = used.filter((r) => !r.pass).length
   const mean = used.length ? used.reduce((s, r) => s + r.weight, 0) / used.length : null
   const changes = used.filter((r, i) => i > 0 && r.pulse !== used[i - 1].pulse).length

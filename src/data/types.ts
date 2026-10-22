@@ -56,7 +56,15 @@ export interface Recipe extends Criteria {
   updatedBy: string
 }
 
+/** 조절하지 않는 쪽의 고정값. 압력 방식이면 Pulse·Speed(ms)를, Pulse 방식이면 압력(MPa)을 쓴다 */
+export interface FixedSetting {
+  pulse: number | null
+  pressure: number | null
+}
+
 export interface Batch extends Criteria {
+  /** 토출기별 고정값. 세팅 단계에서 두 방식을 오갈 수 있도록 둘 다 적어 둔다 */
+  fixed?: Partial<Record<DispenserId, FixedSetting>>
   /** 배치에서 따로 정한 조정 목표(%). 없으면 adjustPct */
   drugAdjustPct?: number
   baseAdjustPct?: number
@@ -106,8 +114,10 @@ export interface IpcRecord {
   pulse: number
   /** 이 기록의 조절 방식. 없으면 Pulse */
   control?: Control
-  /** 압력 방식에서 고정해 둔 Pulse·Speed(ms). 추적용으로만 남긴다 */
+  /** 압력 방식에서 고정해 둔 Pulse·Speed(ms). 배치 정보에서 가져와 추적용으로 남긴다 */
   pulseMs?: number
+  /** Pulse 방식에서 고정해 둔 압력(MPa). 배치 정보에서 가져와 추적용으로 남긴다 */
+  pressureMpa?: number
   shots: number
   /** 측정한 합산 중량(mg) */
   totalWeight: number
@@ -297,6 +307,10 @@ export const controlOf = (c: { control?: Control }): Control => c.control ?? 'pu
 /** 조절값의 이름: 압력 방식이면 "압력", 아니면 Pulse·Speed */
 export const ctrlName = (control: Control, type: MaterialType) => (control === 'pressure' ? '압력' : paramName(type))
 export const ctrlUnit = (control: Control) => (control === 'pressure' ? PRESSURE_UNIT : PARAM_UNIT)
+
+export function fixedOf(batch: Pick<Batch, 'fixed'>, id: DispenserId): FixedSetting {
+  return { pulse: null, pressure: null, ...batch.fixed?.[id] }
+}
 
 /** 추천 조절값을 반올림하는 단위 */
 export function stepOf(c: Pick<Criteria, 'control' | 'pulseStep' | 'pressureStep'>): number {

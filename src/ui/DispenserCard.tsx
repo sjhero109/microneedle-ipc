@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useActor } from '../data/auth'
-import { dispenserView, evaluate, trayLabels, unused } from '../data/model'
+import { dispenserView, evaluate, recordControl, trayLabels, unused } from '../data/model'
 import { addRecord, useDb } from '../data/store'
 import type { Batch, DispenserId, MaterialType } from '../data/types'
-import { PARAM_UNIT, adjustOf, ctrlName, ctrlUnit, materialOf } from '../data/types'
+import { PARAM_UNIT, PRESSURE_UNIT, adjustOf, ctrlName, ctrlUnit, fixedOf, materialOf } from '../data/types'
 import type { IpcPoint, Phase } from '../engine'
 import { Button, Deviation, Field, NumInput, fmt, parseNum, signed, timeOnly } from './common'
 import { TrendChart, type TrendPoint } from './TrendChart'
@@ -34,15 +34,19 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const param = ctrlName(saved.control, dispenser.type)
   const unit = ctrlUnit(saved.control)
   const lastUsed = saved.records.filter((r) => !unused(r)).at(-1)
+  // 배치 정보의 고정값: 압력 방식이면 Pulse·Speed, Pulse 방식이면 압력을 기록에 함께 남긴다
+  const fixed = fixedOf(batch, dispenser.id)
+  const fixedValue = pressure ? fixed.pulse : fixed.pressure
+  const lastSame = saved.records.filter((r) => recordControl(r) === saved.control).at(-1)
 
   const [tray, setTray] = useState(() => (last ? String(last.tray) : '1'))
   // Pulse 입력란에는 추천값을 미리 넣어 둔다. 적합 범위 안이어도 IPC마다 조정 목표를 따라가도록 조정한다
+  // 방식을 바꾼 직후에는 배치 정보에 적어 둔 값(예: Pulse 방식 때 고정했던 압력)을 시작값으로 넣는다
   const [pulse, setPulse] = useState(() => {
     const r = saved.recommendation
-    return r ? String(r.pulse) : last ? String(last.pulse) : ''
+    const start = pressure ? fixed.pressure : fixed.pulse
+    return r ? String(r.pulse) : lastSame ? String(lastSame.pulse) : start !== null ? String(start) : ''
   })
-  // 압력 방식에서 고정해 둔 Pulse·Speed(ms). 기록용이며 직전 값을 넣어 둔다
-  const [pulseMs, setPulseMs] = useState(() => (last?.pulseMs !== undefined ? String(last.pulseMs) : ''))
   const [total, setTotal] = useState('')
   const [showAll, setShowAll] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -54,8 +58,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const t = parseNum(tray)
   const p = parseNum(pulse)
   const w = parseNum(total)
-  const ms = parseNum(pulseMs)
-  const valid = t !== null && t >= 0 && p !== null && p > 0 && w !== null && w > 0 && (pulseMs.trim() === '' || (ms !== null && ms > 0))
+  const valid = t !== null && t >= 0 && p !== null && p > 0 && w !== null && w > 0
   // 토출 개시 전 IPC는 1번 트레이에서 한다. 따로 고르지 않고 트레이번호로만 구분한다.
   // 0번은 생산 전 세팅 때 트레이 없이 측정한 값이다
   const noTray = t === 0
@@ -69,9 +72,9 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
   const levelDev = (v: number) => evaluate(batch, dispenser.type, v)
 
   const points: TrendPoint[] = (() => {
-    const steps = [...view.model.steps]
+    // 다른 조절 방식의 기록은 계산에 쓰지 않으므로 제외 기록처럼 흐리게 그린다
     const rows: TrendPoint[] = saved.records.map((r) => {
-      const s = unused(r) ? undefined : steps.shift()
+      const level = view.levels.get(r.id)
       return {
         seq: r.seq,
         tray: r.tray,
@@ -79,14 +82,14 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
         pulse: r.pulse,
         pct: (r.weight / r.target) * 100,
         weight: r.weight,
-        levelPct: s ? (s.levelAtPulse / r.target) * 100 : null,
+        levelPct: level === undefined ? null : (level / r.target) * 100,
         band: r.band,
-        excluded: unused(r),
+        excluded: unused(r) || recordControl(r) !== saved.control,
         test: r.test,
       }
     })
     if (draft && verdict) {
-      const s = testMode ? undefined : steps.shift()
+      const s = testMode ? undefined : view.model.steps.at(-1)
       rows.push({
         seq: rows.length + 1,
         tray: draft.tray,
@@ -108,7 +111,7 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
     setBusy(true)
     setError('')
     try {
-      await addRecord(actor, batch.id, dispenser.id, { tray: t, pulse: p, ...(pressure && ms !== null ? { pulseMs: ms } : {}), totalWeight: w, phase, test: testMode })
+      await addRecord(actor, batch.id, dispenser.id, { tray: t, pulse: p, ...(fixedValue === null ? {} : pressure ? { pulseMs: fixedValue } : { pressureMpa: fixedValue }), totalWeight: w, phase, test: testMode })
       setTotal('')
       // 적합이든 부적합이든 다음 IPC를 위해 추천 Pulse를 입력란에 넣어 둔다
       if (!testMode && rec) setPulse(String(rec.pulse))
@@ -198,18 +201,23 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
       <div className={`${open ? 'flex' : 'hidden'} flex-col gap-3 px-4 pb-4 lg:flex`}>
         {note && <p className="rounded-lg bg-sunken px-3 py-2 text-xs text-sub">{note}</p>}
 
-        <div className={`grid ${pressure ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} items-end gap-2`}>
+        <p className="num text-xs text-sub">
+          {pressure ? `고정 ${dispenser.type === 'drug' ? 'Pulse' : 'Speed'}` : '고정 압력'}{' '}
+          <b className="text-ink">{fixedValue === null ? '미입력' : `${fixedValue} ${pressure ? PARAM_UNIT : PRESSURE_UNIT}`}</b> (배치 정보 · 기록에 함께 저장)
+        </p>
+        {saved.otherModeCount > 0 && (
+          <p className="rounded-lg bg-sunken px-3 py-2 text-xs text-sub">
+            이 배치의 {pressure ? 'Pulse' : '압력'} 방식 기록 {saved.otherModeCount}건은 지금 방식의 계산에 쓰지 않습니다. 방식을 바꾼 뒤 첫 IPC부터 다시 추정합니다.
+          </p>
+        )}
+        <div className="grid grid-cols-3 items-end gap-2">
           <Field label="트레이번호">
             <NumInput value={tray} onChange={(e) => setTray(e.target.value)} inputMode="numeric" />
           </Field>
           <Field label={rec && String(rec.pulse) === pulse ? `${param} (${unit}, 추천값)` : `${param} (${unit})`}>
             <NumInput value={pulse} onChange={(e) => setPulse(e.target.value)} />
           </Field>
-          {pressure && (
-            <Field label={`고정 ${dispenser.type === 'drug' ? 'Pulse' : 'Speed'} (${PARAM_UNIT}, 기록용)`}>
-              <NumInput value={pulseMs} onChange={(e) => setPulseMs(e.target.value)} />
-            </Field>
-          )}
+
           <Field label={saved.shots > 1 ? `${saved.shots}회 합계 (mg)` : '중량 (mg)'}>
             <NumInput value={total} onChange={(e) => setTotal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />
           </Field>
@@ -298,7 +306,10 @@ export function DispenserCard({ batch, dispenser, testMode }: Props) {
                       {labels.get(r.id) ?? r.tray}
                       {r.test && <span className="ml-1 rounded bg-sunken px-1 text-xs">테스트</span>}
                     </td>
-                    <td className="py-1.5">{r.pulse}</td>
+                    <td className="py-1.5">
+                      {r.pulse}
+                      {recordControl(r) !== saved.control && <span className="ml-1 text-xs text-sub">{ctrlUnit(recordControl(r))}</span>}
+                    </td>
                     <td className="py-1.5 text-right">{fmt(r.totalWeight, 2)}</td>
                     <td className="py-1.5 text-right">
                       <Deviation devPct={r.devPct} band={r.band} />
